@@ -2,8 +2,8 @@
 set -euo pipefail  # 开启严格模式，出错立即退出
 #===============================================
 # 基础配置（保留原有IP修改，可根据需求调整）
-echo "【1/5】修改默认IP为 192.168.1.251"
-sed -i 's/192.168.1.1/192.168.1.251/g' openwrt/package/base-files/files/bin/config_generate || echo "默认IP修改失败（可能路径不符）"
+echo "【1/5】修改默认IP为 192.168.31.238"
+sed -i 's/192.168.1.1/192.168.31.238/g' openwrt/package/base-files/files/bin/config_generate || echo "默认IP修改失败（可能路径不符）"
 
 # 禁用/移除指定插件 START
 # 1. 清理feeds中残留的插件（仅卸载非SSR-Plus的插件）
