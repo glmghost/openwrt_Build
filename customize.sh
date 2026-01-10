@@ -115,4 +115,16 @@ fi
 #sed -i 's/$(TARGET_DIR)) install/$(TARGET_DIR)) install --force-overwrite/' package/Makefile
 #sed -i 's/root:.*/root:$1$tTPCBw1t$ldzfp37h5lSpO9VXk4uUE\/:18336:0:99999:7:::/g' package/base-files/files/etc/shadow
 
+# 替换 erofs-utils 下载源为国内镜像（解决下载失败）
+echo "【1.5/5】替换 erofs-utils 下载源"
+EROFS_UTILS_MAKEFILE="tools/erofs-utils/Makefile"
+if [ -f "$EROFS_UTILS_MAKEFILE" ]; then
+    # 替换官方源为 GitHub 镜像（稳定可用）
+    sed -i 's|https://git.kernel.org/pub/scm/fs/erofs/erofs-utils.git/snapshot/|https://github.com/erofs/erofs-utils/archive/refs/tags/|g' "$EROFS_UTILS_MAKEFILE"
+    sed -i 's|erofs-utils-|v|g' "$EROFS_UTILS_MAKEFILE"
+    echo "erofs-utils 下载源替换完成"
+else
+    echo "erofs-utils Makefile 不存在，跳过下载源替换"
+fi
+
 echo "===== 自定义配置执行完成（保留SSR-Plus+仅启用NaiveProxy） ====="
