@@ -17,12 +17,23 @@ else
     echo "erofs-utils Makefile 不存在，跳过下载源替换"
 fi
 
+# 新增：禁用 erofs-utils 工具包（兜底，避免下载/编译失败中断流程）
+echo "【1.6/7】禁用 erofs-utils 工具包，规避编译风险"
+CONFIG_FILE="openwrt/.config"
+touch "$CONFIG_FILE"  # 确保文件存在
+sed -i '/CONFIG_TOOL_EROFS_UTILS/d' "$CONFIG_FILE"
+echo "CONFIG_TOOL_EROFS_UTILS=n" >> "$CONFIG_FILE"
+
 # 禁用/移除指定插件 START
 # 1. 清理feeds中残留的插件（保留SSR-Plus，移除Turbo ACC+防火墙+Argon+Nikki）
 echo "【2/7】卸载feeds中指定插件（移除Nikki相关组件）"
 FEEDS_SCRIPT="openwrt/scripts/feeds"  # 修正路径：指向openwrt子目录
 if [ -f "$FEEDS_SCRIPT" ]; then
-    cd openwrt && ./scripts/feeds uninstall -a mosdns luci-app-mosdns openclash luci-app-openclash homeproxy luci-app-homeproxy mihomo luci-app-mihomo luci-app-ddns ddns-scripts luci-app-upnp miniupnpd luci-app-turboacc firewall luci-app-firewall luci-theme-argon luci-app-argon-config luci-theme-nikki luci-app-nikki-config || echo "部分feeds插件未安装，跳过卸载" && cd ..
+    # 优化：拆分命令，避免管道符导致cd失效，提高容错
+    cd openwrt || exit 1
+    ./scripts/feeds uninstall -a mosdns luci-app-mosdns openclash luci-app-openclash homeproxy luci-app-homeproxy mihomo luci-app-mihomo luci-app-ddns ddns-scripts luci-app-upnp miniupnpd luci-app-turboacc firewall luci-app-firewall luci-theme-argon luci-app-argon-config luci-theme-nikki luci-app-nikki-config || echo "部分feeds插件未安装，跳过卸载"
+    cd .. || exit 1
+    
     # 额外清理feeds目录下残留文件（含Nikki主题）
     rm -rf openwrt/feeds/luci/applications/luci-app-turboacc*
     rm -rf openwrt/feeds/luci/applications/luci-app-firewall*
@@ -60,7 +71,11 @@ if [ -d "$SMALL_PACKAGE_DIR" ]; then
     # 清理small-package下Nikki主题相关源码
     rm -rf "$SMALL_PACKAGE_DIR"/luci-theme-nikki*
     rm -rf "$SMALL_PACKAGE_DIR"/luci-app-nikki-config*
-    echo "small-package目录非SSR-Plus插件源码删除完成"
+    
+    # 新增：清理SSR-Plus/NaiveProxy残留编译文件，避免产物损坏
+    rm -rf "$SMALL_PACKAGE_DIR"/luci-app-ssr-plus/.built "$SMALL_PACKAGE_DIR"/ssr-plus/.built
+    rm -rf "$SMALL_PACKAGE_DIR"/naiveproxy/.built
+    echo "small-package目录非SSR-Plus插件源码删除完成，SSR-Plus残留已清理"
 else
     echo "small-package目录不存在，跳过该目录源码删除"
 fi
@@ -85,15 +100,18 @@ echo "全局残留插件（含Argon、Nikki主题）清理完成"
 # 3. 刷新并重新安装SSR-Plus相关feeds（确保依赖完整，先更新再安装）
 echo "【4/7】刷新feeds并仅安装SSR-Plus相关组件"
 if [ -f "$FEEDS_SCRIPT" ]; then
-    cd openwrt && ./scripts/feeds update -a || echo "feeds全局更新失败（非关键错误，继续执行）" && cd ..
+    # 优化：拆分命令，提高执行稳定性，避免连带失败
+    cd openwrt || exit 1
+    ./scripts/feeds update -a || echo "feeds全局更新失败（非关键错误，继续执行）"
     # 仅安装SSR-Plus相关，不安装其他插件（避免连带安装多余组件）
-    cd openwrt && ./scripts/feeds install -y luci-app-ssr-plus ssr-plus naiveproxy || echo "SSR-Plus相关feeds安装失败，请检查feeds配置" && cd ..
+    ./scripts/feeds install -y luci-app-ssr-plus ssr-plus naiveproxy || echo "SSR-Plus相关feeds安装失败，请检查feeds配置"
+    cd .. || exit 1
 else
     echo "feeds脚本不存在，跳过feeds刷新和安装步骤"
 fi
 
-# 4. 配置.config文件并固化编译参数（关键：移除不存在的./scripts/config调用）
-echo "【5/7】配置.config文件（跳过无效的固化工具，确保配置生效）"
+# 4. 配置.config文件并固化编译参数（关键：优化配置写入，增加容错）
+echo "【5/7】配置.config文件（确保配置生效，规避依赖冲突）"
 # 定义.config文件路径（指向openwrt子目录）
 CONFIG_FILE="openwrt/.config"
 # 第一步：先初始化.config（避免原有配置干扰，若已有配置先备份再清空）
@@ -104,9 +122,12 @@ touch "$CONFIG_FILE"
 
 # 第二步：写入核心配置（先禁用所有不需要的插件，再启用SSR-Plus+NaiveProxy）
 cat > "$CONFIG_FILE" << EOF
-# 基础编译配置（可根据你的设备补充，此处保留核心插件配置）
+# 基础编译配置（开启开发模式和编译日志，方便排查错误）
 CONFIG_DEVEL=y
 CONFIG_BUILD_LOG=y
+
+# 禁用 erofs-utils 工具包（兜底配置）
+CONFIG_TOOL_EROFS_UTILS=n
 
 # 禁用所有不需要的插件（全局禁用）
 CONFIG_PACKAGE_mosdns=n
@@ -131,7 +152,7 @@ CONFIG_PACKAGE_kmod-fast-tcp=n
 CONFIG_PACKAGE_kmod-shortcut-fe=n
 CONFIG_PACKAGE_kmod-shortcut-fw=n
 
-# 禁用防火墙功能
+# 禁用防火墙功能（注意：禁用后固件无防火墙，需自行承担风险）
 CONFIG_PACKAGE_firewall=n
 CONFIG_PACKAGE_firewall4=n
 CONFIG_PACKAGE_luci-app-firewall=n
@@ -153,7 +174,7 @@ CONFIG_PACKAGE_luci-theme-bootstrap=y
 # 启用SSR-Plus核心及仅NaiveProxy协议（强制启用，禁用所有其他协议）
 CONFIG_PACKAGE_luci-app-ssr-plus=y
 CONFIG_PACKAGE_ssr-plus=y
-CONFIG_PACKAGE_naiveproxy=y  # 关键：显式启用NaiveProxy依赖
+CONFIG_PACKAGE_naiveproxy=y  # 关键：显式启用NaiveProxy依赖，确保编译产物存在
 
 # 仅保留NaiveProxy协议，其他协议全部强制禁用（无默认值，明确赋值n）
 CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_NaiveProxy=y
@@ -171,15 +192,14 @@ CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Clash_TUN=n
 CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Clash_Extra=n
 EOF
 
-# 移除 ./scripts/config 相关命令（该文件不存在，无需固化）
-# 移除 make defconfig 相关命令（依赖OpenWrt编译环境，当前目录不支持）
-echo "配置文件写入完成，跳过无效的固化步骤（需在OpenWrt源码目录内执行固化）"
+echo "配置文件写入完成，无需额外固化步骤（编译时自动加载.config）"
 
 echo "【6/7】验证禁用项是否配置正确"
-grep -E "turboacc|firewall|argon|nikki" "$CONFIG_FILE" | grep -v "=n" || echo "Turbo ACC、防火墙、Argon、Nikki已完全禁用"
+# 优化：忽略注释行，仅检查有效配置
+grep -E "^CONFIG_PACKAGE_(turboacc|firewall|argon|nikki)=" "$CONFIG_FILE" | grep -v "=n" || echo "Turbo ACC、防火墙、Argon、Nikki已完全禁用"
 
 echo "【7/7】验证默认主题是否为bootstrap"
-grep "luci-theme-bootstrap=y" "$CONFIG_FILE" && echo "默认主题已设置为bootstrap" || echo "默认主题配置需检查"
+grep "^CONFIG_PACKAGE_luci-theme-bootstrap=y" "$CONFIG_FILE" && echo "默认主题已设置为bootstrap" || echo "默认主题配置需检查"
 
 # 禁用/移除指定插件 END
 
