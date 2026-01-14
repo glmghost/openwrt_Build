@@ -125,11 +125,35 @@ jobs:
      
     - name: Load custom configuration
       run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        # 明确：当前工作目录即为GitHub项目根目录（${{ github.workspace }}）
+        echo "当前工作目录（GitHub项目根目录）：$(pwd)"
+    
+        # 核心操作：处理GitHub项目根目录下的.config文件
+        if [ -e ./.config ]; then
+          echo "✅ 找到GitHub项目根目录下的.config文件，准备同步到openwrt编译目录"
+          # 强制复制项目根目录.config到openwrt目录（覆盖已有.config，确保配置唯一）
+          cp -f ./.config ./openwrt/.config
+          echo "✅ 已成功将项目根目录.config复制到 ./openwrt/.config"
+        else
+          echo "⚠️  警告：GitHub项目根目录下未找到.config文件，将使用openwrt目录默认配置"
+        fi
+
+        # 可选：同步项目根目录下的files目录（若有自定义文件需部署，保留即可）
+        if [ -d ./files ]; then
+          echo "✅ 找到GitHub项目根目录下的files目录，准备移动到openwrt目录"
+          mv -f ./files ./openwrt/files
+          echo "✅ 已成功将项目根目录files目录移动到 ./openwrt/files"
+        fi
+
+        # 可选（推荐）：进入openwrt目录，验证并补全配置，确保编译无配置错误
+        cd ./openwrt
+        if [ -e ./.config ]; then
+          echo "✅ 验证openwrt目录下的.config配置，自动补全缺失项"
+          make defconfig
+          echo "✅ 配置验证完成，生成完整编译配置"
+        else
+          echo "⚠️  警告：openwrt目录下无有效.config文件，后续编译可能失败"
+        fi
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
