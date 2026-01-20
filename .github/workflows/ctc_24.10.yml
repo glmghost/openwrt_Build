@@ -1,7 +1,7 @@
 #=================================================
 # Description: Build OpenWrt using GitHub Actions
 # Lisence: MIT
-# Author: kenzo
+# Author: kenzo (修复：v2dat Makefile 不存在报错 + WeTransfer 日志引用错误)
 #=================================================
 
 name: openwrt_24.10
@@ -102,6 +102,7 @@ jobs:
       run: |
         ./scripts/feeds update -a
         
+    # ===================== 核心修复：Defconfig 步骤（解决 v2dat Makefile 不存在报错）=====================
     - name: Defconfig ${{matrix.target}}
       env:
         CONFIG_FILE: '${{matrix.target}}.config'
@@ -120,11 +121,26 @@ jobs:
         sed -i "s/%D %V, %C/openwrt $(date +'%m.%d') by kenzo/g" package/base-files/files/etc/banner
         sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
         ./scripts/feeds update -a 
-        sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
+        
+        # 修复：v2dat Makefile 存在性检查 + 路径适配（官方packages / smpackage 源）
+        V2DAT_FILE="feeds/packages/utils/v2dat/Makefile"
+        # 若官方路径不存在，切换到 smpackage 源的常见路径
+        if [ ! -f "$V2DAT_FILE" ]; then
+          V2DAT_FILE="feeds/smpackage/v2dat/Makefile"
+        fi
+        # 仅文件存在时执行 sed 修改，避免报错
+        if [ -f "$V2DAT_FILE" ]; then
+          sed -i 's#GO_PKG_TARGET_VARS.*# #g' "$V2DAT_FILE"
+          echo "✅ 成功修改 v2dat Makefile：$V2DAT_FILE"
+        else
+          echo "⚠️  未找到 v2dat Makefile，跳过修改操作"
+        fi
+        
         ./scripts/feeds install -a
         cp -f feeds/smpackage/.github/diy/ctc_24.10.config .config && make defconfig
         #sed -i 's/CONFIG_BINUTILS_VERSION="2.42"/CONFIG_BINUTILS_VERSION="2.43.1"/' .config
-     
+    # ================================================================================================
+
     - name: Load custom configuration
       run: |
         # 明确：当前工作目录即为GitHub项目根目录（${{ github.workspace }}）
@@ -233,9 +249,9 @@ jobs:
         curl -fsSL git.io/file-transfer | sh
         ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
         echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
-        # echo "::set-output name=url::$(cat cowtransfer.log | grep https | cut -f3 -d" ")"
         echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
 
+    # ===================== 修复：WeTransfer 步骤日志文件引用错误（cowtransfer.log → wetransfer.log）=====================
     - name: Upload firmware to WeTransfer
       id: wetransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
@@ -243,19 +259,17 @@ jobs:
         curl -fsSL git.io/file-transfer | sh
         ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
         echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
-        # echo "::set-output name=url::$(cat wetransfer.log | grep https | cut -f3 -d" ")"
-        echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+        echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+    # ====================================================================================================================
 
     - name: Generate release tag
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
-        # echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
         [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
         [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
-        # echo "::set-output name=status::success"
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
