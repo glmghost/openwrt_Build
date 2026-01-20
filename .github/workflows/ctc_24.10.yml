@@ -102,31 +102,32 @@ jobs:
       run: |
         ./scripts/feeds update -a
         
-    # 在「Defconfig ${{matrix.target}}」步骤中，添加修改 rust Makefile 的代码（放在 ./scripts/feeds install -a 之后）
     - name: Defconfig ${{matrix.target}}
+      working-directory: ./openwrt  # 关键：指定工作目录为openwrt
       env:
         CONFIG_FILE: '${{matrix.target}}.config'
       run: |
-        # 原有代码省略（保留之前的 v2dat 修复、文件复制等）
+        # 原有逻辑：安装所有feeds
         ./scripts/feeds install -a
+        # 复制配置文件（路径已适配openwrt工作目录）
         cp -f feeds/smpackage/.github/diy/ctc_24.10.config .config
-    
+
         # ========== 新增：彻底修改 rust Makefile，强制锁定 1.78 版本 ==========
-        # 进入 rust 包目录，修改 Makefile 中的版本
-        RUST_MAKEFILE="openwrt/feeds/packages/lang/rust/Makefile"
+        # 进入 rust 包目录，修改 Makefile 中的版本（路径已去掉openwrt/前缀）
+        RUST_MAKEFILE="feeds/packages/lang/rust/Makefile"
         # 备份原 Makefile
         cp $RUST_MAKEFILE ${RUST_MAKEFILE}.bak
         # 强制替换版本为 1.78.0（关键：覆盖硬编码的 1.89.0）
         sed -i 's/^PKG_VERSION:=.*/PKG_VERSION:=1.78.0/' $RUST_MAKEFILE
         sed -i 's/^PKG_SOURCE_VERSION:=.*/PKG_SOURCE_VERSION:=0127066623c221d8c3ec502151ad61c781e09994/' $RUST_MAKEFILE
         sed -i 's/^PKG_HASH:=.*/PKG_HASH:=d988845c1e55158021a2890f29d882896c5bd94c225b4333568498867c210999/' $RUST_MAKEFILE
-        # 再次锁定 .config 中的版本，防止覆盖
-        echo "CONFIG_RUST_VERSION=\"1.78\"" >> openwrt/.config
-        echo "CONFIG_RUST_CARGO_VERSION=\"1.78\"" >> openwrt/.config
-        echo "CONFIG_RUST_HOST_VERSION=\"1.78\"" >> openwrt/.config
-        echo "CONFIG_RUST_DEBUG=\"n\"" >> openwrt/.config
+        # 再次锁定 .config 中的版本，防止覆盖（路径改为当前目录的.config）
+        echo "CONFIG_RUST_VERSION=\"1.78\"" >> ./.config
+        echo "CONFIG_RUST_CARGO_VERSION=\"1.78\"" >> ./.config
+        echo "CONFIG_RUST_HOST_VERSION=\"1.78\"" >> ./.config
+        echo "CONFIG_RUST_DEBUG=\"n\"" >> ./.config
         # ========== rust 版本锁定结束 ==========
-    
+
         make defconfig
 
     - name: Load custom configuration
