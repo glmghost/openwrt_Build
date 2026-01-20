@@ -80,7 +80,7 @@ jobs:
 
     - name: Clone source code
       env: 
-        REPO_URL: https://github.com/immortalwrt/immortalwrt
+        REPO_URL: https://github.com/openwrt/openwrt
         REPO_BRANCH: openwrt-24.10
         TZ: Asia/Shanghai        
       run: |
