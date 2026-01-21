@@ -41,7 +41,7 @@ jobs:
       fail-fast: false
       matrix:
         target: [Lean]
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@main
@@ -55,7 +55,7 @@ jobs:
           haskell: true
           large-packages: true
           docker-images: true
-          swap-storage: true       
+          swap-storage: true
 
       - name: Initialization environment
         env:
@@ -72,7 +72,7 @@ jobs:
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           sudo timedatectl set-timezone "Asia/Shanghai"
-          
+
       - name: Get current date
         id: date
         run: |
@@ -86,9 +86,9 @@ jobs:
           fi
           VERSION="$(echo "${{github.event.action}}" | grep -Eo " [0-9.]+" | sed -e 's/ //')" || true
           [ "$VERSION" ] && echo "VERSION=$VERSION" >> $GITHUB_ENV || echo "VERSION=$(date +'%m.%d')" >> $GITHUB_ENV
-          
+
       - name: Clone source code
-        env: 
+        env:
           REPO_URL: https://github.com/openwrt/openwrt
           REPO_BRANCH: openwrt-24.10
         run: |
@@ -96,6 +96,11 @@ jobs:
           cd openwrt
           # 仅保留helloworld源，移除smpackage源
           sed -i '$a src-git helloworld https://github.com/fw876/helloworld' feeds.conf.default
+          # 清理 feeds，只更新 helloworld 和基础 feeds
+          ./scripts/feeds clean
+          ./scripts/feeds update -i -f helloworld
+          ./scripts/feeds install -i -f -p helloworld -a
+
 
       - name: Free up disk space
         env:
@@ -122,39 +127,42 @@ jobs:
           cd openwrt
           # 第一步：先生成默认.config，确保文件存在，消除配置缺失警告
           make defconfig
-          
+
           # 优先使用项目根目录的配置文件（覆盖默认配置）
           if [ -e "../$CONFIG_FILE" ]; then
             mv "../$CONFIG_FILE" .config
             make defconfig
           fi
-          
+
           # 检查customize.sh是否存在
           if [ -f ../customize.sh ]; then
             chmod +x ../customize.sh && ../customize.sh
           else
             echo "Warning: customize.sh not found, skip execution"
           fi
-          
-          # 保留golang相关修改
-          rm -rf feeds/packages/lang/golang
-          git clone https://github.com/kenzok8/golang -b 1.25 feeds/packages/lang/golang
-          # 移除openclash（原依赖smpackage）
+
+          # --- 修改：移除手动更新 Golang 的步骤 ---
+          # rm -rf feeds/packages/lang/golang
+          # git clone https://github.com/kenzok8/golang -b 1.25 feeds/packages/lang/golang
+          # -------------------------------
+
+          # 移除openclash（原依赖smpackage，确保只用helloworld源）
           rm -rf feeds/luci/applications/luci-app-openclash
-          
+
           # 自定义banner和主题
           sed -i "s/%D %V, %C/openwrt $(date +'%m.%d') by kenzo/g" package/base-files/files/etc/banner
           sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
-          
-          ./scripts/feeds update -a 
+
+          # 再次更新 feeds，确保所有更改的配置生效
+          ./scripts/feeds update -a
           # v2dat容错处理
           if [ -f feeds/packages/utils/v2dat/Makefile ]; then
-            sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
+            sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile
           else
             echo "Warning: feeds/packages/utils/v2dat/Makefile not found, skip sed modification"
           fi
           ./scripts/feeds install -a
-          
+
           # ========== 核心修复：修复rust编译的llvm参数，解决panic ==========
           # 1. 提前准备rust源码，确保配置文件可修改
           make package/feeds/packages/rust/host/prepare -j1 V=s || true
@@ -164,16 +172,19 @@ jobs:
           find build_dir/target-*/host/rustc-*/ -name "config.rs" -exec sed -i \
           's/llvm.download-ci-llvm = false/llvm.download-ci-llvm = "if-unchanged"/g' {} \;
           # 3. 验证修改结果
-          RUST_CONFIG_PATH=$(find build_dir/target-*/host/rustc-*/src/bootstrap/src/core/config -name "config.rs")
+          RUST_CONFIG_PATH=$(find build_dir/target-*/host/rustc-*/ -name "config.rs" | head -n 1)
           if [ -f "$RUST_CONFIG_PATH" ]; then
             grep "llvm.download-ci-llvm" "$RUST_CONFIG_PATH"
             echo "✅ Rust config fixed successfully: llvm.download-ci-llvm = if-unchanged"
           else
             echo "⚠️  Rust config file not found, but env is set"
           fi
-          
+
           # ========== 启用rust相关配置，消除依赖警告 ==========
-          sed -i '/rust/d' .config
+          sed -i '/CONFIG_PACKAGE_rust/d' .config
+          sed -i '/CONFIG_PACKAGE_rustc/d' .config
+          sed -i '/CONFIG_HOST_RUSTC/d' .config
+          sed -i '/CONFIG_FEED_rust/d' .config
           cat >> .config << EOF
           CONFIG_PACKAGE_rust=y
           CONFIG_PACKAGE_rustc=y
@@ -192,42 +203,53 @@ jobs:
           cd openwrt
           # 处理项目根目录的.config（再次确保）
           if [ -e "../.config" ]; then
+            # 备份当前 .config 以防万一
+            cp .config .config.bak
+            # 复制用户提供的配置
             cp -f ../.config .config
-            # 确保rust配置启用
-            sed -i '/rust/d' .config
+            # 确保rust配置启用 (即使在用户配置之后)
+            sed -i '/CONFIG_PACKAGE_rust/d' .config
+            sed -i '/CONFIG_PACKAGE_rustc/d' .config
+            sed -i '/CONFIG_HOST_RUSTC/d' .config
+            sed -i '/CONFIG_FEED_rust/d' .config
             cat >> .config << EOF
             CONFIG_PACKAGE_rust=y
             CONFIG_PACKAGE_rustc=y
             CONFIG_HOST_RUSTC=y
             CONFIG_FEED_rust=y
             EOF
+            # 确保 luci-theme-argon 被选中 (即使在用户配置之后)
+            sed -i '/CONFIG_PACKAGE_luci-theme-bootstrap/d' .config
+            sed -i '/CONFIG_PACKAGE_luci-theme-argon/d' .config
+            echo "CONFIG_PACKAGE_luci-theme-argon=y" >> .config
+            echo "CONFIG_PACKAGE_luci-app-openclash=n" >> .config # 确保openclash未选中
             make defconfig
-            echo "✅ 已同步项目根目录.config并启用rust"
+            echo "✅ 已同步项目根目录.config，启用rust并确保argon主题"
           fi
-          
+
           # 处理files目录
           if [ -d "../files" ]; then
             mv -f ../files ./files
             echo "✅ 已同步项目根目录files"
           fi
-          
+
           # 验证最终配置
           make defconfig
           echo "✅ 配置验证完成"
 
       - name: SSH connection to Actions
         uses: P3TERX/ssh2actions@v1.0.0
-        if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+        if: github.event.inputs.ssh == 'true'
         env:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          
+
       - name: Download package
         working-directory: ./openwrt
         run: |
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec rm -f {} \;
-          
+
       - name: Cache
         uses: stupidloud/cachewrtbuild@main
         with:
@@ -235,14 +257,16 @@ jobs:
           mixkey: ${{ matrix.target }}
           clean: ${{ contains(github.event.action, 'nocache') }}
           prefix: ${{ github.workspace }}/openwrt
-      
+
       - name: Check space usage
         run: |
           shopt -s extglob
           cd openwrt
-          if [[ -f staging_dir/*${{ env.MTARGET }}*/bin ]]; then
-              rm -rf staging_dir/!(*${{ env.MTARGET }}*|host|hostpkg) build_dir/!(*${{ env.MTARGET }}*|host|hostpkg)
-          fi
+          # --- 修改：简化空间清理逻辑，移除对未定义变量 MTARGET 的引用 ---
+          # if [[ -f staging_dir/*${{ env.MTARGET }}*/bin ]]; then
+          #     rm -rf staging_dir/!(*${{ env.MTARGET }}*|host|hostpkg) build_dir/!(*${{ env.MTARGET }}*|host|hostpkg)
+          # fi
+          rm -rf build_dir/host* build_dir/toolchain-* 2>/dev/null || true # 清理一些通用的大目录
           df -hT
 
       - name: Compile the firmware
@@ -258,7 +282,7 @@ jobs:
         uses: actions/upload-artifact@main
         if: success() && env.UPLOAD_BIN_DIR == 'true'
         with:
-          name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          name: OpenWrt_bin_${{matrix.target}}_${{ env.date }} # --- 修改：使用已定义的 date 变量 ---
           path: openwrt/bin
 
       - name: Organize files
@@ -279,12 +303,12 @@ jobs:
           echo ${{matrix.target}} >> version.txt
           rm -rf sha256sums
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-          
+
       - name: Upload firmware directory
         uses: actions/upload-artifact@main
         if: steps.organize.outcome == 'success' && !cancelled()
         with:
-          name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          name: OpenWrt_firmware_${{matrix.target}}_${{ env.date }} # --- 修改：使用已定义的 date 变量 ---
           path: ${{ env.FIRMWARE }}
 
       - name: Upload firmware to cowtransfer
@@ -303,7 +327,7 @@ jobs:
           curl -fsSL git.io/file-transfer | sh
           ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
           echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
-          echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+          echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
 
       - name: Generate release tag
         id: tag
