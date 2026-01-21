@@ -136,13 +136,15 @@ jobs:
 
           # 检查customize.sh是否存在
           if [ -f ../customize.sh ]; then
-            # --- 修改：增加执行时的错误处理提示 ---
+            # --- 修改：先添加执行权限，再执行 ---
+            echo "Found customize.sh, adding execute permission..."
+            chmod +x ../customize.sh
             echo "Executing customize.sh..."
             # 使用 bash -x 来查看具体哪一行出错，方便调试
             set -x 
             ../customize.sh || { echo "customize.sh failed, check the script content and paths."; exit 1; }
             set +x
-            echo "customize.sh executed."
+            echo "customize.sh executed successfully."
           else
             echo "Info: customize.sh not found, skip execution"
           fi
