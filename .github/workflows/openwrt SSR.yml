@@ -136,7 +136,13 @@ jobs:
         sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
         
         ./scripts/feeds update -a 
-        sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
+        # ========== 关键修复：给v2dat/Makefile修改添加容错 ==========
+        # 仅当v2dat/Makefile存在时才执行sed修改，避免文件不存在报错
+        if [ -f feeds/packages/utils/v2dat/Makefile ]; then
+          sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
+        else
+          echo "Warning: feeds/packages/utils/v2dat/Makefile not found, skip sed modification"
+        fi
         ./scripts/feeds install -a
         
         # ========== 调整Lean.config的来源 ==========
