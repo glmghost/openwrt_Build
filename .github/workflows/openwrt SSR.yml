@@ -101,7 +101,6 @@ jobs:
           ./scripts/feeds update -i -f helloworld
           ./scripts/feeds install -i -f -p helloworld -a
 
-
       - name: Free up disk space
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -174,22 +173,20 @@ jobs:
           # ========== 核心修复：修复rust编译的llvm参数，解决panic ==========
           # 1. 提前准备rust源码，确保配置文件可修改
           make package/feeds/packages/rust/host/prepare -j1 V=s || echo "Warning: rust host prepare might have warnings/errors, continuing..."
-          # 2. 全局替换rust配置中的llvm.download-ci-llvm参数（100%生效）
-          # 注意：find命令可能因为输出太多而产生broken pipe，使用true忽略错误
-          find build_dir/target-*/host/rustc-*/ -name "config.rs" -exec sed -i \
-          's/llvm.download-ci-llvm = true/llvm.download-ci-llvm = "if-unchanged"/g' {} \; 2>/dev/null || true
-          find build_dir/target-*/host/rustc-*/ -name "config.rs" -exec sed -i \
-          's/llvm.download-ci-llvm = false/llvm.download-ci-llvm = "if-unchanged"/g' {} \; 2>/dev/null || true
-          # 3. 验证修改结果（处理可能找不到文件的情况）
-          RUST_CONFIG_PATH=$(find build_dir/target-*/host/rustc-*/ -name "config.rs" 2>/dev/null | head -n 1)
-          if [ -n "$RUST_CONFIG_PATH" ] && [ -f "$RUST_CONFIG_PATH" ]; then
-            grep "llvm.download-ci-llvm" "$RUST_CONFIG_PATH"
+          
+          # 修复解压后文件的权限问题（关键修复点）
+          chmod -R 755 build_dir/target-*/host/rustc-* 2>/dev/null || true
+
+          # 2. 更健壮的Rust配置修改（防止Broken pipe）
+          RUST_CONFIG_DIR=$(find build_dir/target-*/host/rustc-*/src -name "config.rs" 2>/dev/null | xargs dirname | head -n 1)
+          if [ -n "$RUST_CONFIG_DIR" ] && [ -f "$RUST_CONFIG_DIR/config.rs" ]; then
+            sed -i 's/llvm.download-ci-llvm = .*/llvm.download-ci-llvm = "if-unchanged"/g' "$RUST_CONFIG_DIR/config.rs"
             echo "✅ Rust config fixed successfully: llvm.download-ci-llvm = if-unchanged"
           else
-            echo "⚠️  Rust config file not found in expected location. Fix via sed might not have applied. Relies on LLVM_DOWNLOAD_CI_LLVM env var."
+            echo "⚠️  Rust config file not found in expected location. Relying on environment variable."
           fi
 
-          # ========== 启用rust相关配置，消除依赖警告 ==========
+          # 3. 启用rust相关配置，消除依赖警告
           sed -i '/CONFIG_PACKAGE_rust/d' .config
           sed -i '/CONFIG_PACKAGE_rustc/d' .config
           sed -i '/CONFIG_HOST_RUSTC/d' .config
@@ -200,18 +197,18 @@ jobs:
           CONFIG_HOST_RUSTC=y
           CONFIG_FEED_rust=y
           EOF
-          # 重新生成配置
+
+          # 4. 重新生成配置（带有错误检查）
           echo "Re-running make defconfig..."
           make defconfig || { echo "make defconfig failed!"; exit 1; }
           echo "make defconfig succeeded."
 
-          # 验证rust配置 (将grep输出重定向，避免潜在的write error)
+          # 5. 验证rust配置
           echo "===== Rust config check ====="
-          grep -E "rust|HOST_RUSTC" .config > rust_config_check.txt || echo "No rust/ HOST_RUSTC lines found in .config, or grep failed."
+          grep -E "rust|HOST_RUSTC" .config > rust_config_check.txt || echo "No rust/ HOST_RUSTC lines found."
           cat rust_config_check.txt
           echo "============================="
-          echo "Defconfig stage completed."
-          
+
       - name: Load custom configuration
         run: |
           cd openwrt
@@ -265,7 +262,7 @@ jobs:
           find dl -size -1024c -exec rm -f {} \;
 
       - name: Cache
-        uses: stupidloud/cachewrtbuild@main
+        uses: stupidloud/cachewrtpackages@main
         with:
           ccache: 'true'
           mixkey: ${{ matrix.target }}
@@ -276,11 +273,7 @@ jobs:
         run: |
           shopt -s extglob
           cd openwrt
-          # --- 修改：简化空间清理逻辑，移除对未定义变量 MTARGET 的引用 ---
-          # if [[ -f staging_dir/*${{ env.MTARGET }}*/bin ]]; then
-          #     rm -rf staging_dir/!(*${{ env.MTARGET }}*|host|hostpkg) build_dir/!(*${{ env.MTARGET }}*|host|hostpkg)
-          # fi
-          rm -rf build_dir/host* build_dir/toolchain-* 2>/dev/null || true # 清理一些通用的大目录
+          rm -rf build_dir/host* build_dir/toolchain-* 2>/dev/null || true
           df -hT
 
       - name: Compile the firmware
@@ -296,7 +289,7 @@ jobs:
         uses: actions/upload-artifact@main
         if: success() && env.UPLOAD_BIN_DIR == 'true'
         with:
-          name: OpenWrt_bin_${{matrix.target}}_${{ env.date }} # --- 修改：使用已定义的 date 变量 ---
+          name: OpenWrt_bin_${{matrix.target}}_${{ env.date }}
           path: openwrt/bin
 
       - name: Organize files
@@ -322,7 +315,7 @@ jobs:
         uses: actions/upload-artifact@main
         if: steps.organize.outcome == 'success' && !cancelled()
         with:
-          name: OpenWrt_firmware_${{matrix.target}}_${{ env.date }} # --- 修改：使用已定义的 date 变量 ---
+          name: OpenWrt_firmware_${{matrix.target}}_${{ env.date }}
           path: ${{ env.FIRMWARE }}
 
       - name: Upload firmware to cowtransfer
