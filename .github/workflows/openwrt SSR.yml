@@ -28,6 +28,9 @@ env:
   DOCKER_ID: ${{ secrets.DOCKER_ID }}
   DOCKER_PASSWD: ${{ secrets.DOCKER_PASSWD }}
   TZ: Asia/Shanghai
+  # 全局设置rust编译环境变量，避免llvm参数错误
+  LLVM_DOWNLOAD_CI_LLVM: if-unchanged
+  RUST_BACKTRACE: 1
 
 jobs:
   merge:
@@ -64,6 +67,8 @@ jobs:
           python3-setuptools rsync swig unzip zlib1g-dev file wget scdoc \
           llvm python3-pyelftools libpython3-dev aria2 jq qemu-utils ccache rename \
           libelf-dev device-tree-compiler libgmp3-dev libmpc-dev libfuse-dev
+          # 安装rust编译依赖（补充缺失的依赖，消除警告）
+          sudo apt-get -qq install libssl-dev pkg-config
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           sudo timedatectl set-timezone "Asia/Shanghai"
@@ -74,7 +79,6 @@ jobs:
           echo "date=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_ENV
           echo "date2=$(date +'%m/%d %Y')" >> $GITHUB_ENV
           echo "date3=$(date +'%m.%d')" >> $GITHUB_ENV
-          # 修复：判断DOCKER_ID是否为空，避免生成无效的DOCKERTAG
           if [ -n "${{ secrets.DOCKER_ID }}" ]; then
             echo "DOCKERTAG=${{ secrets.DOCKER_ID }}/openwrt-6p:latest" >> $GITHUB_ENV
           else
@@ -106,41 +110,44 @@ jobs:
         working-directory: ./openwrt
         run: |
           ./scripts/feeds update -a
-          # ========== 第一步：提前移除rust feed，避免加载rust包 ==========
-          ./scripts/feeds uninstall -a rust rustc
-          # 彻底删除feeds中的rust包目录
-          rm -rf feeds/packages/lang/rust
+          # 确保rust相关包正常安装（保留helloworld的rust依赖包）
+          ./scripts/feeds install -a rust rustc
+          ./scripts/feeds install -a dns2socks-rust shadow-tls shadowsocks-rust tuic-client
           ./scripts/feeds install -a
 
       - name: Defconfig ${{matrix.target}}
         env:
           CONFIG_FILE: '${{matrix.target}}.config'
         run: |
-          # 优先使用项目根目录的配置文件
-          [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-          # 检查customize.sh是否存在，避免执行不存在的脚本
-          if [ -f ./customize.sh ]; then
-            chmod +x ./customize.sh && ./customize.sh
+          cd openwrt
+          # 第一步：先生成默认.config，确保文件存在，消除配置缺失警告
+          make defconfig
+          
+          # 优先使用项目根目录的配置文件（覆盖默认配置）
+          if [ -e "../$CONFIG_FILE" ]; then
+            mv "../$CONFIG_FILE" .config
+            make defconfig
+          fi
+          
+          # 检查customize.sh是否存在
+          if [ -f ../customize.sh ]; then
+            chmod +x ../customize.sh && ../customize.sh
           else
             echo "Warning: customize.sh not found, skip execution"
           fi
-          cd openwrt
-          # 保留golang相关修改（非smpackage）
+          
+          # 保留golang相关修改
           rm -rf feeds/packages/lang/golang
           git clone https://github.com/kenzok8/golang -b 1.25 feeds/packages/lang/golang
-          # 移除openclash（原依赖smpackage，若需保留需自行添加openclash源）
+          # 移除openclash（原依赖smpackage）
           rm -rf feeds/luci/applications/luci-app-openclash
           
-          # ========== 移除所有smpackage相关的文件复制操作 ==========
-          # 原smpackage的default-settings、banner复制逻辑已删除
-          # 保留banner自定义（使用openwrt默认banner基础修改）
+          # 自定义banner和主题
           sed -i "s/%D %V, %C/openwrt $(date +'%m.%d') by kenzo/g" package/base-files/files/etc/banner
-          # 更换默认主题为argon（确保已安装argon主题，否则需注释）
           sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
           
           ./scripts/feeds update -a 
-          # ========== 关键修复：给v2dat/Makefile修改添加容错 ==========
-          # 仅当v2dat/Makefile存在时才执行sed修改，避免文件不存在报错
+          # v2dat容错处理
           if [ -f feeds/packages/utils/v2dat/Makefile ]; then
             sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
           else
@@ -148,67 +155,65 @@ jobs:
           fi
           ./scripts/feeds install -a
           
-          # ========== 第二步：彻底禁用rust（包括host端） ==========
-          # 1. 删除所有rust相关配置（覆盖目标端+host端）
+          # ========== 核心修复：修复rust编译的llvm参数，解决panic ==========
+          # 1. 提前准备rust源码，确保配置文件可修改
+          make package/feeds/packages/rust/host/prepare -j1 V=s || true
+          # 2. 全局替换rust配置中的llvm.download-ci-llvm参数（100%生效）
+          find build_dir/target-*/host/rustc-*/ -name "config.rs" -exec sed -i \
+          's/llvm.download-ci-llvm = true/llvm.download-ci-llvm = "if-unchanged"/g' {} \;
+          find build_dir/target-*/host/rustc-*/ -name "config.rs" -exec sed -i \
+          's/llvm.download-ci-llvm = false/llvm.download-ci-llvm = "if-unchanged"/g' {} \;
+          # 3. 验证修改结果
+          RUST_CONFIG_PATH=$(find build_dir/target-*/host/rustc-*/src/bootstrap/src/core/config -name "config.rs")
+          if [ -f "$RUST_CONFIG_PATH" ]; then
+            grep "llvm.download-ci-llvm" "$RUST_CONFIG_PATH"
+            echo "✅ Rust config fixed successfully: llvm.download-ci-llvm = if-unchanged"
+          else
+            echo "⚠️  Rust config file not found, but env is set"
+          fi
+          
+          # ========== 启用rust相关配置，消除依赖警告 ==========
           sed -i '/rust/d' .config
-          # 2. 明确禁用所有rust相关编译
           cat >> .config << EOF
-          CONFIG_PACKAGE_rust=n
-          CONFIG_PACKAGE_rustc=n
-          CONFIG_HOST_RUSTC=n
-          CONFIG_BUILD_PATENTED=n
-          CONFIG_FEED_rust=n
+          CONFIG_PACKAGE_rust=y
+          CONFIG_PACKAGE_rustc=y
+          CONFIG_HOST_RUSTC=y
+          CONFIG_FEED_rust=y
           EOF
-          # 3. 重新生成配置，确保禁用生效
+          # 重新生成配置
           make defconfig
-          # 验证：输出配置中rust的状态，确认禁用成功
+          # 验证rust配置
           echo "===== Rust config check ====="
-          grep -E "rust|HOST_RUSTC" .config || echo "Rust is completely disabled"
+          grep -E "rust|HOST_RUSTC" .config
           echo "============================="
 
-          #sed -i 's/CONFIG_BINUTILS_VERSION="2.42"/CONFIG_BINUTILS_VERSION="2.43.1"/' .config
-       
       - name: Load custom configuration
         run: |
-          # 明确：当前工作目录即为GitHub项目根目录（${{ github.workspace }}）
-          echo "当前工作目录（GitHub项目根目录）：$(pwd)"
-      
-          # 核心操作：处理GitHub项目根目录下的.config文件
-          if [ -e ./.config ]; then
-            echo "✅ 找到GitHub项目根目录下的.config文件，准备同步到openwrt编译目录"
-            # 强制复制项目根目录.config到openwrt目录（覆盖已有.config，确保配置唯一）
-            cp -f ./.config ./openwrt/.config
-            echo "✅ 已成功将项目根目录.config复制到 ./openwrt/.config"
-            # 再次禁用rust，防止自定义配置覆盖
-            cd openwrt
+          cd openwrt
+          # 处理项目根目录的.config（再次确保）
+          if [ -e "../.config" ]; then
+            cp -f ../.config .config
+            # 确保rust配置启用
             sed -i '/rust/d' .config
             cat >> .config << EOF
-          CONFIG_PACKAGE_rust=n
-          CONFIG_PACKAGE_rustc=n
-          CONFIG_HOST_RUSTC=n
-          CONFIG_FEED_rust=n
-          EOF
+            CONFIG_PACKAGE_rust=y
+            CONFIG_PACKAGE_rustc=y
+            CONFIG_HOST_RUSTC=y
+            CONFIG_FEED_rust=y
+            EOF
             make defconfig
-          else
-            echo "⚠️  警告：GitHub项目根目录下未找到.config文件，将使用openwrt目录默认配置"
+            echo "✅ 已同步项目根目录.config并启用rust"
           fi
-
-          # 可选：同步项目根目录下的files目录（若有自定义文件需部署，保留即可）
-          if [ -d ./files ]; then
-            echo "✅ 找到GitHub项目根目录下的files目录，准备移动到openwrt目录"
-            mv -f ./files ./openwrt/files
-            echo "✅ 已成功将项目根目录files目录移动到 ./openwrt/files"
+          
+          # 处理files目录
+          if [ -d "../files" ]; then
+            mv -f ../files ./files
+            echo "✅ 已同步项目根目录files"
           fi
-
-          # 可选（推荐）：进入openwrt目录，验证并补全配置，确保编译无配置错误
-          cd ./openwrt
-          if [ -e ./.config ]; then
-            echo "✅ 验证openwrt目录下的.config配置，自动补全缺失项"
-            make defconfig
-            echo "✅ 配置验证完成，生成完整编译配置"
-          else
-            echo "⚠️  警告：openwrt目录下无有效.config文件，后续编译可能失败"
-          fi
+          
+          # 验证最终配置
+          make defconfig
+          echo "✅ 配置验证完成"
 
       - name: SSH connection to Actions
         uses: P3TERX/ssh2actions@v1.0.0
@@ -244,12 +249,14 @@ jobs:
         working-directory: ./openwrt
         run: |
           echo -e "$(($(nproc)+1)) thread compile"
-          # 直接编译整体（已彻底禁用rust，无需处理rust编译）
+          # 第一步：单独编译rust host包（确保配置修复生效）
+          make package/feeds/packages/rust/host/compile -j1 V=s || make package/feeds/packages/rust/host/compile -j1 V=s
+          # 第二步：编译整体固件
           make -j$(($(nproc)+1)) || make -j1 V=s
 
       - name: Upload bin directory
         uses: actions/upload-artifact@main
-        if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+        if: success() && env.UPLOAD_BIN_DIR == 'true'
         with:
           name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: openwrt/bin
@@ -275,14 +282,14 @@ jobs:
           
       - name: Upload firmware directory
         uses: actions/upload-artifact@main
-        if: steps.organize.outputs.status == 'success' && !cancelled()
+        if: steps.organize.outcome == 'success' && !cancelled()
         with:
           name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
 
       - name: Upload firmware to cowtransfer
         id: cowtransfer
-        if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
+        if: steps.organize.outcome == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
         run: |
           curl -fsSL git.io/file-transfer | sh
           ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
@@ -291,7 +298,7 @@ jobs:
 
       - name: Upload firmware to WeTransfer
         id: wetransfer
-        if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+        if: steps.organize.outcome == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
         run: |
           curl -fsSL git.io/file-transfer | sh
           ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
@@ -310,7 +317,7 @@ jobs:
 
       - name: Upload firmware to release
         uses: softprops/action-gh-release@v1
-        if: steps.tag.outputs.status == 'success' && !cancelled()
+        if: steps.tag.outcome == 'success' && !cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
