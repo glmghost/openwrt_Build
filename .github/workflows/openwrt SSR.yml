@@ -201,11 +201,17 @@ jobs:
           CONFIG_FEED_rust=y
           EOF
           # 重新生成配置
-          make defconfig
-          # 验证rust配置
+          echo "Re-running make defconfig..."
+          make defconfig || { echo "make defconfig failed!"; exit 1; }
+          echo "make defconfig succeeded."
+
+          # 验证rust配置 (将grep输出重定向，避免潜在的write error)
           echo "===== Rust config check ====="
-          grep -E "rust|HOST_RUSTC" .config
+          grep -E "rust|HOST_RUSTC" .config > rust_config_check.txt || echo "No rust/ HOST_RUSTC lines found in .config, or grep failed."
+          cat rust_config_check.txt
           echo "============================="
+          echo "Defconfig stage completed."
+          
       - name: Load custom configuration
         run: |
           cd openwrt
