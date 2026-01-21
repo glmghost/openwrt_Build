@@ -1,7 +1,7 @@
 #=================================================
 # Description: Build OpenWrt using GitHub Actions
 # Lisence: MIT
-# Author: kenzo (modified for openwrt-24.10 & helloworld)
+# Author: kenzo (fixed for customize.sh)
 #=================================================
 
 name: OpenWrt-24.10 helloworld config
@@ -86,7 +86,6 @@ jobs:
       run: |
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
-        # 添加 helloworld 源作为 feeds
         echo "src-git helloworld https://github.com/fw876/helloworld.git" >> feeds.conf.default
 
     - name: Free up disk space
@@ -107,26 +106,34 @@ jobs:
       env:
         CONFIG_FILE: '${{matrix.target}}.config'
       run: |
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-        chmod +x ./customize.sh && ./customize.sh
         cd openwrt
-        # 更新 feeds 以确保包含新添加的 helloworld
-        ./scripts/feeds update -a
-        # 安装 helloworld 包及其依赖
-        ./scripts/feeds install -a -p helloworld
-        # 如果项目根目录有对应配置文件，则复制并使用它
-        if [ -f "../${{matrix.target}}.config" ]; then
-             cp "../${{matrix.target}}.config" .config
-             echo "Using custom config file: ${{matrix.target}}.config"
+        # 处理配置文件
+        if [ -e "../${CONFIG_FILE}" ]; then
+          mv "../${CONFIG_FILE}" .config
+          echo "✅ Using custom config file: $CONFIG_FILE"
         else
-             echo "Warning: No custom config file found at ../${{matrix.target}}.config"
+          echo "⚠️ No custom config file found at ../${CONFIG_FILE}"
         fi
-        # 运行 make defconfig 生成最终配置
+        
+        # 修复 customize.sh 路径问题
+        if [ -e "../customize.sh" ]; then
+          echo "✅ Found customize.sh, copying to openwrt directory..."
+          cp -f ../customize.sh .
+          chmod +x ./customize.sh
+          echo "✅ Running customize.sh..."
+          ./customize.sh
+        else
+          echo "⚠️ customize.sh not found in repo root, skipping customization"
+        fi
+        
+        # 更新 feeds 并安装 helloworld
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a -p helloworld
         make defconfig
 
     - name: Load custom configuration
       run: |
-        # 核心操作：处理GitHub项目根目录下的.config文件
+        # 处理根目录的 .config 文件（如果存在）
         if [ -e ./.config ]; then
           echo "✅ Found .config in GitHub repo root, syncing to openwrt build dir"
           cp -f ./.config ./openwrt/.config
@@ -134,13 +141,13 @@ jobs:
           echo "⚠️  Warning: No .config file found in GitHub repo root"
         fi
 
-        # 可选：同步项目根目录下的files目录（若有自定义文件需部署）
+        # 处理根目录的 files 目录
         if [ -d ./files ]; then
           echo "✅ Found files directory in GitHub repo root, moving to openwrt dir"
           mv -f ./files ./openwrt/files
         fi
 
-        # 进入openwrt目录，验证并补全配置
+        # 验证 openwrt 目录下的配置
         cd ./openwrt
         if [ -e ./.config ]; then
           echo "✅ Validating .config and finalizing configuration..."
