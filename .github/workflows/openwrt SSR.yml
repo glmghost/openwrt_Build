@@ -159,13 +159,15 @@ jobs:
     - name: SSH connection to Actions (Fixed)
       if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
       run: |
-        # 使用 wget 替代 curl 避免 403 问题
-        wget https://github.com/tmate-io/tmate/releases/download/2.4.0/tmate-2.4.0-x86_64-linux.tar.gz
+       # 使用正确的 GitHub release 链接 (添加 v 前缀)
+        wget "https://github.com/tmate-io/tmate/releases/download/v2.4.0/tmate-2.4.0-x86_64-linux.tar.gz"
         tar xzvf tmate-2.4.0-x86_64-linux.tar.gz
         sudo mv tmate-2.4.0-x86_64-linux/tmate /usr/local/bin/
+    
         # 启动 tmate 会话
         tmate -S /tmp/tmate.sock new-session -d
         sleep 5
+    
         # 获取连接 URL
         tmate_url=$(tmate -S /tmp/tmate.sock display -p '#{tmate_url}')
         echo "✅ SSH session URL: $tmate_url"
