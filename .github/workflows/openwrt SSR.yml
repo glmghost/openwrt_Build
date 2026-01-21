@@ -1,7 +1,7 @@
 #=================================================
 # Description: Build OpenWrt using GitHub Actions
 # Lisence: MIT
-# Author: kenzo (fixed for customize.sh)
+# Author: kenzo (fixed SSH functionality)
 #=================================================
 
 name: OpenWrt-24.10 helloworld config
@@ -156,12 +156,22 @@ jobs:
           echo "⚠️  Warning: No valid .config file in openwrt dir, build may fail."
         fi
 
-    - name: SSH connection to Actions
-      uses: P3TERX/ssh2actions@v1.0.0
-      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
-      env:
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+    - name: SSH connection to Actions (Fixed)
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
+      run: |
+        # 使用 wget 替代 curl 避免 403 问题
+        wget https://github.com/tmate-io/tmate/releases/download/2.4.0/tmate-2.4.0-x86_64-linux.tar.gz
+        tar xzvf tmate-2.4.0-x86_64-linux.tar.gz
+        sudo mv tmate-2.4.0-x86_64-linux/tmate /usr/local/bin/
+        # 启动 tmate 会话
+        tmate -S /tmp/tmate.sock new-session -d
+        sleep 5
+        # 获取连接 URL
+        tmate_url=$(tmate -S /tmp/tmate.sock display -p '#{tmate_url}')
+        echo "✅ SSH session URL: $tmate_url"
+        echo "tmate_url=$tmate_url" >> $GITHUB_ENV
+        echo "tmate_url=$tmate_url" >> $GITHUB_OUTPUT
+        echo "::warning file=ssh::SSH session URL: $tmate_url"
 
     - name: Download package
       working-directory: ./openwrt
