@@ -107,6 +107,10 @@ jobs:
       working-directory: ./openwrt
       run: |
         ./scripts/feeds update -a
+        # ========== 第一步：提前移除rust feed，避免加载rust包 ==========
+        ./scripts/feeds uninstall -a rust rustc
+        # 彻底删除feeds中的rust包目录
+        rm -rf feeds/packages/lang/rust
         ./scripts/feeds install -a
 
     - name: Defconfig ${{matrix.target}}
@@ -145,26 +149,24 @@ jobs:
         fi
         ./scripts/feeds install -a
         
-        # ========== 调整Lean.config的来源 ==========
-        # 若项目根目录有Lean.config，使用该文件；否则使用openwrt默认配置
-        if [ -f ../Lean.config ]; then
-          cp -f ../Lean.config .config && make defconfig
-        else
-          echo "Warning: Lean.config not found, use openwrt default config"
-          make defconfig
-        fi
+        # ========== 第二步：彻底禁用rust（包括host端） ==========
+        # 1. 删除所有rust相关配置（覆盖目标端+host端）
+        sed -i '/rust/d' .config
+        # 2. 明确禁用所有rust相关编译
+        cat >> .config << EOF
+CONFIG_PACKAGE_rust=n
+CONFIG_PACKAGE_rustc=n
+CONFIG_HOST_RUSTC=n
+CONFIG_BUILD_PATENTED=n
+CONFIG_FEED_rust=n
+EOF
+        # 3. 重新生成配置，确保禁用生效
+        make defconfig
+        # 验证：输出配置中rust的状态，确认禁用成功
+        echo "===== Rust config check ====="
+        grep -E "rust|HOST_RUSTC" .config || echo "Rust is completely disabled"
+        echo "============================="
 
-        # ========== 关键修复：解决Rust编译的llvm.download-ci-llvm错误 ==========
-        # 1. 提前下载rust源码（确保配置文件可修改）
-        make package/feeds/packages/rust/host/prepare -j1 V=s || true
-        # 2. 修改rust bootstrap配置，将llvm.download-ci-llvm从true改为if-unchanged
-        RUST_CONFIG_PATH=$(find build_dir/target-*/host/rustc-*/src/bootstrap/src/core/config -name "config.rs")
-        if [ -f "$RUST_CONFIG_PATH" ]; then
-          sed -i 's/llvm.download-ci-llvm = true/llvm.download-ci-llvm = "if-unchanged"/g' "$RUST_CONFIG_PATH"
-          echo "✅ Fixed rust config: llvm.download-ci-llvm set to if-unchanged"
-        else
-          echo "⚠️  Rust config file not found, skip fix (may cause compile error)"
-        fi
         #sed -i 's/CONFIG_BINUTILS_VERSION="2.42"/CONFIG_BINUTILS_VERSION="2.43.1"/' .config
      
     - name: Load custom configuration
@@ -178,6 +180,16 @@ jobs:
           # 强制复制项目根目录.config到openwrt目录（覆盖已有.config，确保配置唯一）
           cp -f ./.config ./openwrt/.config
           echo "✅ 已成功将项目根目录.config复制到 ./openwrt/.config"
+          # 再次禁用rust，防止自定义配置覆盖
+          cd openwrt
+          sed -i '/rust/d' .config
+          cat >> .config << EOF
+CONFIG_PACKAGE_rust=n
+CONFIG_PACKAGE_rustc=n
+CONFIG_HOST_RUSTC=n
+CONFIG_FEED_rust=n
+EOF
+          make defconfig
         else
           echo "⚠️  警告：GitHub项目根目录下未找到.config文件，将使用openwrt目录默认配置"
         fi
@@ -233,8 +245,7 @@ jobs:
       working-directory: ./openwrt
       run: |
         echo -e "$(($(nproc)+1)) thread compile"
-        # 先单独编译rust包（确保配置修复生效），再编译整体
-        make package/feeds/packages/rust/host/compile -j1 V=s || make package/feeds/packages/rust/host/compile -j1 V=s
+        # 直接编译整体（已彻底禁用rust，无需处理rust编译）
         make -j$(($(nproc)+1)) || make -j1 V=s
 
     - name: Upload bin directory
