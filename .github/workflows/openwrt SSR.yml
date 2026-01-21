@@ -153,6 +153,18 @@ jobs:
           echo "Warning: Lean.config not found, use openwrt default config"
           make defconfig
         fi
+
+        # ========== 关键修复：解决Rust编译的llvm.download-ci-llvm错误 ==========
+        # 1. 提前下载rust源码（确保配置文件可修改）
+        make package/feeds/packages/rust/host/prepare -j1 V=s || true
+        # 2. 修改rust bootstrap配置，将llvm.download-ci-llvm从true改为if-unchanged
+        RUST_CONFIG_PATH=$(find build_dir/target-*/host/rustc-*/src/bootstrap/src/core/config -name "config.rs")
+        if [ -f "$RUST_CONFIG_PATH" ]; then
+          sed -i 's/llvm.download-ci-llvm = true/llvm.download-ci-llvm = "if-unchanged"/g' "$RUST_CONFIG_PATH"
+          echo "✅ Fixed rust config: llvm.download-ci-llvm set to if-unchanged"
+        else
+          echo "⚠️  Rust config file not found, skip fix (may cause compile error)"
+        fi
         #sed -i 's/CONFIG_BINUTILS_VERSION="2.42"/CONFIG_BINUTILS_VERSION="2.43.1"/' .config
      
     - name: Load custom configuration
@@ -221,6 +233,8 @@ jobs:
       working-directory: ./openwrt
       run: |
         echo -e "$(($(nproc)+1)) thread compile"
+        # 先单独编译rust包（确保配置修复生效），再编译整体
+        make package/feeds/packages/rust/host/compile -j1 V=s || make package/feeds/packages/rust/host/compile -j1 V=s
         make -j$(($(nproc)+1)) || make -j1 V=s
 
     - name: Upload bin directory
