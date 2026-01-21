@@ -136,7 +136,7 @@ jobs:
 
           # 检查customize.sh是否存在
           if [ -f ../customize.sh ]; then
-            # --- 修改：先添加执行权限，再执行 ---
+            # --- 修改：先添加执行权限 ---
             echo "Found customize.sh, adding execute permission..."
             chmod +x ../customize.sh
             echo "Executing customize.sh..."
