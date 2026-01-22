@@ -194,6 +194,9 @@ jobs:
     - name: Compile the firmware
       working-directory: ./openwrt
       run: |
+        echo "=== Final .config summary ==="
+        grep -E "CONFIG_TARGET_|CONFIG_PACKAGE_" .config | head -n 20
+        
         echo -e "$(($(nproc)+1)) thread compile"
         make -j$(($(nproc)+1)) V=s
 
