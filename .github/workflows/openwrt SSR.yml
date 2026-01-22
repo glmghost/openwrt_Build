@@ -28,6 +28,10 @@ env:
   DOCKER_ID: ${{ secrets.DOCKER_ID }}
   DOCKER_PASSWD: ${{ secrets.DOCKER_PASSWD }}
   TZ: Asia/Shanghai
+  # 添加 MTARGET 环境变量 - 根据您的目标设备修改，常见值: armvirt, aarch64, x86_64
+  MTARGET: "x86-64"
+  # 添加 CONFIG_DIR 环境变量
+  CONFIG_DIR: "."
 
 jobs:
   merge:
@@ -173,7 +177,8 @@ jobs:
     - name: Download package
       working-directory: ./openwrt
       run: |
-        make download -j$(($(nproc)-2))
+        # 修正线程数计算：从 $(nproc-2) 改为 $(( $(nproc) - 2 ))
+        make download -j$(( $(nproc) - 2 ))
         find dl -size -1024c -exec rm -f {} \;
 
     - name: Cache
@@ -188,6 +193,7 @@ jobs:
       run: |
         shopt -s extglob
         cd openwrt
+        # 修正：使用已定义的 MTARGET
         if [[ -f staging_dir/*${{ env.MTARGET }}*/bin ]]; then
             rm -rf staging_dir/!(*${{ env.MTARGET }}*|host|hostpkg) build_dir/!(*${{ env.MTARGET }}*|host|hostpkg)
         fi
@@ -199,8 +205,9 @@ jobs:
         echo "=== Final .config summary ==="
         grep -E "CONFIG_TARGET_|CONFIG_PACKAGE_" .config | head -n 20
         
-        echo "Using $(nproc-2) threads for compilation (avoiding memory overflow)"
-        make -j$(($(nproc)-2)) V=s
+        # 修正线程数计算
+        echo "Using $(( $(nproc) - 2 )) threads for compilation (avoiding memory overflow)"
+        make -j$(( $(nproc) - 2 )) V=s
 
     - name: Upload bin directory
       uses: actions/upload-artifact@main
