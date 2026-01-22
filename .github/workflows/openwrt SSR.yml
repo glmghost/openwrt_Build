@@ -64,7 +64,9 @@ jobs:
         gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
         python3-setuptools rsync swig unzip zlib1g-dev file wget scdoc \
         llvm python3-pyelftools libpython3-dev aria2 jq qemu-utils ccache rename \
-        libelf-dev device-tree-compiler libgmp3-dev libmpc-dev libfuse-dev
+        libelf-dev device-tree-compiler libgmp3-dev libmpc-dev libfuse-dev \
+        libzstd-dev liblz4-dev liblzo2-dev libbrotli-dev libz-dev libzstd-dev \
+        liblzma-dev liblzma-dev libbrotli-dev libzstd-dev
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "Asia/Shanghai"
@@ -84,7 +86,7 @@ jobs:
         REPO_URL: https://github.com/openwrt/openwrt
         REPO_BRANCH: openwrt-24.10
       run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "src-git helloworld https://github.com/fw876/helloworld.git" >> feeds.conf.default
 
@@ -109,8 +111,8 @@ jobs:
         cd openwrt
 
         # 1. 加载主配置文件（优先使用 target.config，否则用 .config）
-        if [ -e "../${CONFIG_DIR:-..}/${CONFIG_FILE}" ]; then
-          cp "../${CONFIG_FILE}" .config
+        if [ -e "../${CONFIG_DIR:-.}/${CONFIG_FILE}" ]; then
+          cp "../${CONFIG_DIR:-.}/${CONFIG_FILE}" .config
           echo "✅ Using custom config: ${CONFIG_FILE}"
         elif [ -e "../.config" ]; then
           cp "../.config" .config
@@ -134,7 +136,7 @@ jobs:
 
         # 4. 生成最终配置（只执行一次！）
         echo "✅ Finalizing configuration with make defconfig..."
-        yes '' | make defconfig  # 自动回答默认值，避免卡死
+        make defconfig
 
     - name: Load custom configuration
       run: |
@@ -171,7 +173,7 @@ jobs:
     - name: Download package
       working-directory: ./openwrt
       run: |
-        make download -j$(($(nproc)+1))
+        make download -j$(($(nproc)-2))
         find dl -size -1024c -exec rm -f {} \;
 
     - name: Cache
@@ -197,8 +199,8 @@ jobs:
         echo "=== Final .config summary ==="
         grep -E "CONFIG_TARGET_|CONFIG_PACKAGE_" .config | head -n 20
         
-        echo -e "$(($(nproc)+1)) thread compile"
-        make -j$(($(nproc)+1)) V=s
+        echo "Using $(nproc-2) threads for compilation (avoiding memory overflow)"
+        make -j$(($(nproc)-2)) V=s
 
     - name: Upload bin directory
       uses: actions/upload-artifact@main
