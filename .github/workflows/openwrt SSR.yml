@@ -1,6 +1,6 @@
 #=================================================
 # Description: Build OpenWrt using GitHub Actions
-# Lisence: MIT
+# License: MIT
 # Author: kenzo (fixed SSH functionality)
 #=================================================
 
@@ -98,7 +98,8 @@ jobs:
         REPO_URL: https://github.com/openwrt/openwrt
         REPO_BRANCH: openwrt-24.10
       run: |
-        git clone  $ REPO_URL -b  $ REPO_BRANCH openwrt
+        # 修复变量引用语法
+        git clone " $ REPO_URL" -b " $ REPO_BRANCH" openwrt
         cd openwrt
         echo "src-git helloworld https://github.com/fw876/helloworld.git" >> feeds.conf.default
         # 确保 libtool 被启用
@@ -279,12 +280,14 @@ jobs:
         echo "🔧 Building host tools first..."
         make tools/install -j $ ((  $ (nproc) - 2 )) || {
           echo "⚠️  Host tools build failed, but continuing with main build"
+          true  # 忽略错误继续执行
         }
         
         # 构建 libtool 单独
         echo "🔧 Building libtool separately..."
         make package/libs/libtool/compile -j $ ((  $ (nproc) - 2 )) || {
           echo "⚠️  Libtool build failed, but continuing with main build"
+          true  # 忽略错误继续执行
         }
         
         # 主构建过程
