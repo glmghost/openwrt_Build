@@ -2,7 +2,7 @@
 # Description: Build OpenWrt using GitHub Actions
 # License: MIT
 # Author: kenzo
-# Modified: Fixed syntax errors for environment variables and git commands
+# Modified: Fixed all syntax errors for environment variables and git commands
 #=================================================
 
 name: OpenWrt Build with Custom Config
@@ -103,7 +103,6 @@ jobs:
 
     - name: Run customize.sh (for IP only)
       run: |
-        # 检查customize.sh是否存在
         if [ -f customize.sh ]; then
           echo "✅ Running customize.sh to modify default IP"
           chmod +x customize.sh
@@ -115,13 +114,11 @@ jobs:
     - name: Update feeds
       working-directory: ./openwrt
       run: |
-        # 添加helloworld源（仅用于获取插件定义，不安装）
         echo 'src-git helloworld https://github.com/fw876/helloworld' >> feeds.conf.default
         ./scripts/feeds update -a
 
     - name: Load custom configuration
       run: |
-        # 检查项目根目录是否有.config
         if [ -e ./.config ]; then
           echo "✅ Found .config in project root, copying to openwrt/.config"
           cp -f ./.config ./openwrt/.config
@@ -129,20 +126,18 @@ jobs:
           echo "⚠️ Warning: .config not found in project root, using default config"
         fi
         
-        # 检查项目根目录是否有files目录
         if [ -d ./files ]; then
           echo "✅ Found files directory in project root, moving to openwrt/files"
           mv -f ./files ./openwrt/files
         fi
         
-        # 进入openwrt目录，安装所有配置的包
         cd openwrt
         ./scripts/feeds install -a
         make defconfig
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
-      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
       env:
         TELEGRAM_CHAT_ID:  $ {{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_BOT_TOKEN:  $ {{ secrets.TELEGRAM_BOT_TOKEN }}
