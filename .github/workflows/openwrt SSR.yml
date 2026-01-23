@@ -25,17 +25,16 @@ env:
   UPLOAD_COWTRANSFER: false
   UPLOAD_WETRANSFER: false
   UPLOAD_RELEASE: true
-  SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-  PASSWORD: ${{ secrets.PASSWORD }}
-  REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-  REMOTE_PORT: ${{ secrets.REMOTE_PORT }}
-  DOCKER_ID: ${{ secrets.DOCKER_ID }}
-  DOCKER_PASSWD: ${{ secrets.DOCKER_PASSWD }}
+  SSH_PRIVATE_KEY:  $ {{ secrets.SSH_PRIVATE_KEY }}
+  PASSWORD:  $ {{ secrets.PASSWORD }}
+  REMOTE_HOST:  $ {{ secrets.REMOTE_HOST }}
+  REMOTE_PORT:  $ {{ secrets.REMOTE_PORT }}
+  DOCKER_ID:  $ {{ secrets.DOCKER_ID }}
+  DOCKER_PASSWD:  $ {{ secrets.DOCKER_PASSWD }}
   TZ: Asia/Shanghai
-  # 添加 MTARGET 环境变量 - 根据您的目标设备修改
-  MTARGET: "x86_64"  # 日志显示构建 x86_64 目标
+  MTARGET: "x86_64"  # 根据您的目标设备修改
   CONFIG_DIR: "."
-  # 添加 Rust 构建相关环境变量
+  # 修复 Rust 构建问题的关键环境变量
   RUST_BACKTRACE: 1
   LLVM_DOWNLOAD_CI_LLVM: "if-unchanged"
 
@@ -44,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.repository.owner.id == github.event.sender.id
 
-    name: Build ${{matrix.target}}
+    name: Build  $ {{matrix.target}}
     strategy:
       fail-fast: false
       matrix:
@@ -87,22 +86,22 @@ jobs:
     - name: Get current date
       id: date
       run: |
-        echo "date=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_ENV
-        echo "date2=$(date +'%m/%d %Y')" >> $GITHUB_ENV
-        echo "date3=$(date +'%m.%d')" >> $GITHUB_ENV
-        echo "DOCKERTAG=${{ secrets.DOCKER_ID }}/openwrt-6p:latest" >> $GITHUB_ENV
-        VERSION="$(echo "${{github.event.action}}" | grep -Eo " [0-9.]+" | sed -e 's/ //')" || true
-        [ "$VERSION" ] && echo "VERSION=$VERSION" >> $GITHUB_ENV || echo "VERSION=$(date +'%m.%d')" >> $GITHUB_ENV
+        echo "date= $ (date +'%Y.%m.%d-%H%M')" >>  $ GITHUB_ENV
+        echo "date2= $ (date +'%m/%d %Y')" >>  $ GITHUB_ENV
+        echo "date3= $ (date +'%m.%d')" >>  $ GITHUB_ENV
+        echo "DOCKERTAG= $ {{ secrets.DOCKER_ID }}/openwrt-6p:latest" >>  $ GITHUB_ENV
+        VERSION=" $ (echo " $ {{github.event.action}}" | grep -Eo " [0-9.]+" | sed -e 's/ //')" || true
+        [ " $ VERSION" ] && echo "VERSION= $ VERSION" >>  $ GITHUB_ENV || echo "VERSION= $ (date +'%m.%d')" >>  $ GITHUB_ENV
 
     - name: Clone source code
       env:
         REPO_URL: https://github.com/openwrt/openwrt
         REPO_BRANCH: openwrt-24.10
       run: |
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        git clone  $ REPO_URL -b  $ REPO_BRANCH openwrt
         cd openwrt
         echo "src-git helloworld https://github.com/fw876/helloworld.git" >> feeds.conf.default
-        # 添加解决 libtool 问题的配置
+        # 确保 libtool 被启用
         echo "CONFIG_PACKAGE_libtool=y" >> .config 2>/dev/null || true
 
     - name: Free up disk space
@@ -125,17 +124,17 @@ jobs:
       run: |
         ./scripts/feeds update -a
 
-    - name: Defconfig ${{matrix.target}}
+    - name: Defconfig  $ {{matrix.target}}
       env:
-        CONFIG_FILE: '${{matrix.target}}.config'
-        MINIMAL_BUILD: ${{ github.event.inputs.minimal || 'false' }}
+        CONFIG_FILE: ' $ {{matrix.target}}.config'
+        MINIMAL_BUILD:  $ {{ github.event.inputs.minimal || 'false' }}
       run: |
         cd openwrt
 
         # 1. 加载主配置文件
-        if [ -e "../${CONFIG_DIR:-.}/${CONFIG_FILE}" ]; then
-          cp "../${CONFIG_DIR:-.}/${CONFIG_FILE}" .config
-          echo "✅ Using custom config: ${CONFIG_FILE}"
+        if [ -e "../ $ {CONFIG_DIR:-.}/ $ {CONFIG_FILE}" ]; then
+          cp "../ $ {CONFIG_DIR:-.}/ $ {CONFIG_FILE}" .config
+          echo "✅ Using custom config:  $ {CONFIG_FILE}"
         elif [ -e "../.config" ]; then
           cp "../.config" .config
           echo "✅ Using fallback .config from repo root"
@@ -145,7 +144,7 @@ jobs:
         fi
 
         # 2. 如果是精简构建，禁用 Rust 相关包
-        if [ "$MINIMAL_BUILD" = "true" ]; then
+        if [ " $ MINIMAL_BUILD" = "true" ]; then
           echo "⚠️  Performing minimal build - disabling Rust packages"
           sed -i '/CONFIG_PACKAGE_rust/d' .config
           echo "CONFIG_PACKAGE_rust=n" >> .config
@@ -177,6 +176,18 @@ jobs:
         echo "CONFIG_PACKAGE_autoconf=y" >> .config
         make defconfig
 
+        # 7. 修复 Rust 构建问题：确保 config.toml 包含正确的设置
+        RUST_CONFIG_TOML="build_dir/target-x86_64_musl/host/rustc-1.89.0-src/config.toml"
+        if [ -f " $ RUST_CONFIG_TOML" ]; then
+          echo "🔧 Fixing Rust config.toml for CI compatibility..."
+          # 清理可能存在的旧设置
+          sed -i '/llvm.download-ci-llvm/d' " $ RUST_CONFIG_TOML"
+          # 添加正确的设置
+          echo "llvm.download-ci-llvm = \"if-unchanged\"" >> " $ RUST_CONFIG_TOML"
+        else
+          echo "⚠️  Warning: Rust config.toml not found at  $ RUST_CONFIG_TOML"
+        fi
+
     - name: Load custom configuration
       run: |
         # 处理根目录的 .config 文件
@@ -202,8 +213,8 @@ jobs:
       uses: P3TERX/ssh2actions@v1.0.0
       if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
       env:
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID:  $ {{ secrets.TELEGRAM_CHAT_ID }}
+        TELEGRAM_BOT_TOKEN:  $ {{ secrets.TELEGRAM_BOT_TOKEN }}
 
     - name: Download package
       working-directory: ./openwrt
@@ -214,20 +225,20 @@ jobs:
         ./scripts/feeds install autoconf
         
         # 修正线程数计算
-        THREADS=$(( $(nproc) - 2 ))
-        [ $THREADS -lt 1 ] && THREADS=1
-        echo "Using $THREADS threads for download"
+        THREADS= $ ((  $ (nproc) - 2 ))
+        [  $ THREADS -lt 1 ] && THREADS=1
+        echo "Using  $ THREADS threads for download"
         
-        make download -j$THREADS
+        make download -j $ THREADS
         find dl -size -1024c -exec rm -f {} \;
 
     - name: Cache
       uses: stupidloud/cachewrtbuild@main
       with:
         ccache: 'true'
-        mixkey: ${{ matrix.target }}
-        clean: ${{ contains(github.event.action, 'nocache') }}
-        prefix: ${{ github.workspace }}/openwrt
+        mixkey:  $ {{ matrix.target }}
+        clean:  $ {{ contains(github.event.action, 'nocache') }}
+        prefix:  $ {{ github.workspace }}/openwrt
 
     - name: Check space usage
       run: |
@@ -244,8 +255,7 @@ jobs:
       id: compile
       working-directory: ./openwrt
       env:
-        # 设置 Rust 相关环境变量
-        RUST_BACKTRACE: 1
+        # 修复 Rust 构建的关键环境变量
         LLVM_DOWNLOAD_CI_LLVM: "if-unchanged"
         # 增加 ulimit 限制
         ULIMIT: unlimited
@@ -265,26 +275,21 @@ jobs:
           rm -rf build_dir/host/libtool*
         fi
         
-        # 修正线程数计算
-        THREADS=$(( $(nproc) - 2 ))
-        [ $THREADS -lt 1 ] && THREADS=1
-        echo "Using $THREADS threads for compilation (avoiding memory overflow)"
-        
-        # 尝试先构建 host 工具
+        # 尝试先构建 host tools
         echo "🔧 Building host tools first..."
-        make tools/install -j$THREADS || {
+        make tools/install -j $ ((  $ (nproc) - 2 )) || {
           echo "⚠️  Host tools build failed, but continuing with main build"
         }
         
         # 构建 libtool 单独
         echo "🔧 Building libtool separately..."
-        make package/libs/libtool/compile -j$THREADS || {
+        make package/libs/libtool/compile -j $ ((  $ (nproc) - 2 )) || {
           echo "⚠️  Libtool build failed, but continuing with main build"
         }
         
         # 主构建过程
         echo "🚀 Starting main build process..."
-        make -j$THREADS || {
+        make -j $ ((  $ (nproc) - 2 )) || {
           echo "⚠️  First build attempt failed, retrying with fewer jobs..."
           make -j2 V=s || {
             echo "❌ Build failed completely"
@@ -298,7 +303,7 @@ jobs:
       uses: actions/upload-artifact@main
       if: steps.compile.outcome == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
-        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt_bin $ {{ env.DEVICE_NAME }} $ {{ env.FILE_DATE }}
         path: openwrt/bin
 
     - name: Organize files
@@ -310,84 +315,84 @@ jobs:
         
         # 只复制必要的固件文件
         for file in *sysupgrade*.bin *sysupgrade*.tar *combined*.bin *combined*.img *combined-efi*.bin *combined-efi*.img; do
-          [ -f "$file" ] && cp "$file" ../../../../../firmware/
+          [ -f " $ file" ] && cp " $ file" ../../../../../firmware/
         done
         
         cd ../../../../..
-        cp openwrt/.config  ./firmware/${{matrix.target}}.config 2>/dev/null || true
+        cp openwrt/.config  ./firmware/ $ {{matrix.target}}.config 2>/dev/null || true
         mkdir -p ./firmware/kernel-config
-        cp openwrt/build_dir/target-*/linux-*/linux-*/.config ./firmware/kernel-config/${{matrix.target}}_kernel.config 2>/dev/null || true
+        cp openwrt/build_dir/target-*/linux-*/linux-*/.config ./firmware/kernel-config/ $ {{matrix.target}}_kernel.config 2>/dev/null || true
         
         cd firmware
-        echo "v${{ env.date2 }}" > version.txt
+        echo "v $ {{ env.date2 }}" > version.txt
         for file in *sysupgrade*.bin *sysupgrade*.tar *combined*.bin *combined*.img *combined-efi*.bin *combined-efi*.img; do
-          [ -f "$file" ] && md5sum "$file" | awk '{print $1}' >> version.txt
+          [ -f " $ file" ] && md5sum " $ file" | awk '{print  $ 1}' >> version.txt
         done
-        rename -v "s/^openwrt/${{ env.VERSION }}-openwrt/" * 2>/dev/null || true
+        rename -v "s/^openwrt/ $ {{ env.VERSION }}-openwrt/" * 2>/dev/null || true
         rename -v "s/friendlyarm_//" *gz 2>/dev/null || true
-        echo "${{matrix.target}}" >> version.txt
-        echo "Build date: ${{ env.date }}" >> version.txt
+        echo " $ {{matrix.target}}" >> version.txt
+        echo "Build date:  $ {{ env.date }}" >> version.txt
         rm -f sha256sums 2>/dev/null || true
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "FIRMWARE= $ PWD" >>  $ GITHUB_ENV
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
       if: steps.organize.outcome == 'success'
       with:
-        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE }}
+        name: OpenWrt_firmware $ {{ env.DEVICE_NAME }} $ {{ env.FILE_DATE }}
+        path:  $ {{ env.FIRMWARE }}
 
     - name: Upload firmware to cowtransfer
       id: cowtransfer
       if: steps.organize.outcome == 'success' && env.UPLOAD_COWTRANSFER == 'true'
       run: |
         curl -fsSL git.io/file-transfer | sh
-        ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
-        echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
-        echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d' ')" >> $GITHUB_OUTPUT
+        ./transfer cow --block 2621440 -s -p 64 --no-progress  $ {FIRMWARE} 2>&1 | tee cowtransfer.log
+        echo "::warning file=cowtransfer.com:: $ (cat cowtransfer.log | grep https)"
+        echo "url= $ (cat cowtransfer.log | grep https | cut -f3 -d' ')" >>  $ GITHUB_OUTPUT
 
     - name: Upload firmware to WeTransfer
       id: wetransfer
       if: steps.organize.outcome == 'success' && env.UPLOAD_WETRANSFER == 'true'
       run: |
         curl -fsSL git.io/file-transfer | sh
-        ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
-        echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
-        echo "url=$(cat wetransfer.log | grep https | cut -f3 -d' ')" >> $GITHUB_OUTPUT
+        ./transfer wet -s -p 16 --no-progress  $ {FIRMWARE} 2>&1 | tee wetransfer.log
+        echo "::warning file=wetransfer.com:: $ (cat wetransfer.log | grep https)"
+        echo "url= $ (cat wetransfer.log | grep https | cut -f3 -d' ')" >>  $ GITHUB_OUTPUT
 
     - name: Generate release tag
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && steps.organize.outcome == 'success'
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+        echo "release_tag= $ (date +"%Y.%m.%d-%H%M")" >>  $ GITHUB_OUTPUT
         touch release.txt
         echo "# OpenWrt Firmware Release" > release.txt
         echo "" >> release.txt
-        echo "Build Date: ${{ env.date2 }}" >> release.txt
-        echo "Target: ${{matrix.target}}" >> release.txt
+        echo "Build Date:  $ {{ env.date2 }}" >> release.txt
+        echo "Target:  $ {{matrix.target}}" >> release.txt
         echo "" >> release.txt
         echo "## Downloads" >> release.txt
         
-        [ $UPLOAD_COWTRANSFER = true ] && echo "- [Download via Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
-        [ $UPLOAD_WETRANSFER = true ] && echo "- [Download via WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
+        [  $ UPLOAD_COWTRANSFER = true ] && echo "- [Download via Cowtransfer]( $ {{ steps.cowtransfer.outputs.url }})" >> release.txt
+        [  $ UPLOAD_WETRANSFER = true ] && echo "- [Download via WeTransfer]( $ {{ steps.wetransfer.outputs.url }})" >> release.txt
         
         echo "" >> release.txt
         echo "## File Checksums" >> release.txt
         echo "\`\`\`" >> release.txt
-        cat ${{ env.FIRMWARE }}/version.txt >> release.txt
+        cat  $ {{ env.FIRMWARE }}/version.txt >> release.txt
         echo "\`\`\`" >> release.txt
         
-        echo "status=success" >> $GITHUB_OUTPUT
+        echo "status=success" >>  $ GITHUB_OUTPUT
 
     - name: Upload firmware to release
       uses: softprops/action-gh-release@v1
       if: steps.tag.outputs.status == 'success'
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN:  $ {{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
+        tag_name:  $ {{ steps.tag.outputs.release_tag }}
         body_path: release.txt
-        files: ${{ env.FIRMWARE }}/*
+        files:  $ {{ env.FIRMWARE }}/*
 
     - name: Delete workflow runs
       uses: glmghost/delete-workflow-runs@main
@@ -402,4 +407,4 @@ jobs:
         keep_latest: 3
         delete_tags: true
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN:  $ {{ secrets.GITHUB_TOKEN }}
