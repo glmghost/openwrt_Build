@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.repository.owner.id == github.event.sender.id
 
-    name: Build  $ {{matrix.target}}
+    name: Build  $ {{ matrix.target }}
     strategy:
       fail-fast: false
       matrix:
@@ -98,7 +98,7 @@ jobs:
         REPO_URL: https://github.com/openwrt/openwrt
         REPO_BRANCH: openwrt-24.10
       run: |
-        # 修复变量引用语法 - 正确的方式
+        # 修复变量引用语法 - 正确的方式（无空格）
         git clone " $ REPO_URL" -b " $ REPO_BRANCH" openwrt
         cd openwrt
         echo "src-git helloworld https://github.com/fw876/helloworld.git" >> feeds.conf.default
@@ -125,9 +125,9 @@ jobs:
       run: |
         ./scripts/feeds update -a
 
-    - name: Defconfig  $ {{matrix.target}}
+    - name: Defconfig  $ {{ matrix.target }}
       env:
-        CONFIG_FILE: ' $ {{matrix.target}}.config'
+        CONFIG_FILE: ' $ {{ matrix.target }}.config'
         MINIMAL_BUILD:  $ {{ github.event.inputs.minimal || 'false' }}
       run: |
         cd openwrt
@@ -146,7 +146,7 @@ jobs:
 
         # 2. 如果是精简构建，禁用 Rust 相关包
         if [ " $ MINIMAL_BUILD" = "true" ]; then
-          echo "⚠️  Performing minimal build - disabling Rust packages"
+          echo "⚠️ Performing minimal build - disabling Rust packages"
           sed -i '/CONFIG_PACKAGE_rust/d' .config
           echo "CONFIG_PACKAGE_rust=n" >> .config
           sed -i '/CONFIG_PACKAGE_rust-std/d' .config
@@ -186,7 +186,7 @@ jobs:
           # 添加正确的设置
           echo "llvm.download-ci-llvm = \"if-unchanged\"" >> " $ RUST_CONFIG_TOML"
         else
-          echo "⚠️  Warning: Rust config.toml not found at  $ RUST_CONFIG_TOML"
+          echo "⚠️ Warning: Rust config.toml not found at  $ RUST_CONFIG_TOML"
         fi
 
     - name: Load custom configuration
@@ -212,7 +212,7 @@ jobs:
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
-      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
       env:
         TELEGRAM_CHAT_ID:  $ {{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_BOT_TOKEN:  $ {{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -279,21 +279,21 @@ jobs:
         # 尝试先构建 host tools
         echo "🔧 Building host tools first..."
         make tools/install -j $ ((  $ (nproc) - 2 )) || {
-          echo "⚠️  Host tools build failed, but continuing with main build"
+          echo "⚠️ Host tools build failed, but continuing with main build"
           true  # 忽略错误继续执行
         }
         
         # 构建 libtool 单独
         echo "🔧 Building libtool separately..."
         make package/libs/libtool/compile -j $ ((  $ (nproc) - 2 )) || {
-          echo "⚠️  Libtool build failed, but continuing with main build"
+          echo "⚠️ Libtool build failed, but continuing with main build"
           true  # 忽略错误继续执行
         }
         
         # 主构建过程
         echo "🚀 Starting main build process..."
         make -j $ ((  $ (nproc) - 2 )) || {
-          echo "⚠️  First build attempt failed, retrying with fewer jobs..."
+          echo "⚠️ First build attempt failed, retrying with fewer jobs..."
           make -j2 V=s || {
             echo "❌ Build failed completely"
             exit 1
@@ -322,9 +322,9 @@ jobs:
         done
         
         cd ../../../../..
-        cp openwrt/.config  ./firmware/ $ {{matrix.target}}.config 2>/dev/null || true
+        cp openwrt/.config ./firmware/ $ {{ matrix.target }}.config 2>/dev/null || true
         mkdir -p ./firmware/kernel-config
-        cp openwrt/build_dir/target-*/linux-*/linux-*/.config ./firmware/kernel-config/ $ {{matrix.target}}_kernel.config 2>/dev/null || true
+        cp openwrt/build_dir/target-*/linux-*/linux-*/.config ./firmware/kernel-config/ $ {{ matrix.target }}_kernel.config 2>/dev/null || true
         
         cd firmware
         echo "v $ {{ env.date2 }}" > version.txt
@@ -333,7 +333,7 @@ jobs:
         done
         rename -v "s/^openwrt/ $ {{ env.VERSION }}-openwrt/" * 2>/dev/null || true
         rename -v "s/friendlyarm_//" *gz 2>/dev/null || true
-        echo " $ {{matrix.target}}" >> version.txt
+        echo " $ {{ matrix.target }}" >> version.txt
         echo "Build date:  $ {{ env.date }}" >> version.txt
         rm -f sha256sums 2>/dev/null || true
         echo "FIRMWARE= $ PWD" >>  $ GITHUB_ENV
@@ -350,7 +350,7 @@ jobs:
       if: steps.organize.outcome == 'success' && env.UPLOAD_COWTRANSFER == 'true'
       run: |
         curl -fsSL git.io/file-transfer | sh
-        ./transfer cow --block 2621440 -s -p 64 --no-progress  $ {FIRMWARE} 2>&1 | tee cowtransfer.log
+        ./transfer cow --block 2621440 -s -p 64 --no-progress  $ FIRMWARE 2>&1 | tee cowtransfer.log
         echo "::warning file=cowtransfer.com:: $ (cat cowtransfer.log | grep https)"
         echo "url= $ (cat cowtransfer.log | grep https | cut -f3 -d' ')" >>  $ GITHUB_OUTPUT
 
@@ -359,7 +359,7 @@ jobs:
       if: steps.organize.outcome == 'success' && env.UPLOAD_WETRANSFER == 'true'
       run: |
         curl -fsSL git.io/file-transfer | sh
-        ./transfer wet -s -p 16 --no-progress  $ {FIRMWARE} 2>&1 | tee wetransfer.log
+        ./transfer wet -s -p 16 --no-progress  $ FIRMWARE 2>&1 | tee wetransfer.log
         echo "::warning file=wetransfer.com:: $ (cat wetransfer.log | grep https)"
         echo "url= $ (cat wetransfer.log | grep https | cut -f3 -d' ')" >>  $ GITHUB_OUTPUT
 
@@ -372,18 +372,18 @@ jobs:
         echo "# OpenWrt Firmware Release" > release.txt
         echo "" >> release.txt
         echo "Build Date:  $ {{ env.date2 }}" >> release.txt
-        echo "Target:  $ {{matrix.target}}" >> release.txt
+        echo "Target:  $ {{ matrix.target }}" >> release.txt
         echo "" >> release.txt
         echo "## Downloads" >> release.txt
         
-        [  $ UPLOAD_COWTRANSFER = true ] && echo "- [Download via Cowtransfer]( $ {{ steps.cowtransfer.outputs.url }})" >> release.txt
-        [  $ UPLOAD_WETRANSFER = true ] && echo "- [Download via WeTransfer]( $ {{ steps.wetransfer.outputs.url }})" >> release.txt
+        [ " $ UPLOAD_COWTRANSFER" = "true" ] && echo "- [Download via Cowtransfer]( $ {{ steps.cowtransfer.outputs.url }})" >> release.txt
+        [ " $ UPLOAD_WETRANSFER" = "true" ] && echo "- [Download via WeTransfer]( $ {{ steps.wetransfer.outputs.url }})" >> release.txt
         
         echo "" >> release.txt
         echo "## File Checksums" >> release.txt
-        echo "\`\`\`" >> release.txt
+        echo "```" >> release.txt
         cat  $ {{ env.FIRMWARE }}/version.txt >> release.txt
-        echo "\`\`\`" >> release.txt
+        echo "```" >> release.txt
         
         echo "status=success" >>  $ GITHUB_OUTPUT
 
