@@ -1,11 +1,11 @@
 #=================================================
 # Description: Build OpenWrt using GitHub Actions
-# Lisence: MIT
+# License: MIT
 # Author: kenzo
-# Modified by: [Your Name]
+# Modified: Use project root .config and customize.sh for IP only
 #=================================================
 
-name: OpenWrt HelloWorld Config
+name: OpenWrt Build with Custom Config
 
 on:
   repository_dispatch:
@@ -21,7 +21,6 @@ on:
         required: true
         default: '23.05'
         options:
-          - '24.10'
           - '23.05'
           - '22.03'
           - 'master'
@@ -41,7 +40,7 @@ env:
   TZ: Asia/Shanghai
 
 jobs:
-  merge:
+  build:
     runs-on: ubuntu-latest
     if: github.event.repository.owner.id == github.event.sender.id
 
@@ -92,9 +91,6 @@ jobs:
         REPO_BRANCH: openwrt- $ {{ github.event.inputs.openwrt_version }}
       run: |
         git clone --depth 1  $ REPO_URL -b  $ REPO_BRANCH openwrt
-        cd openwrt
-        # Add helloworld source
-        echo 'src-git helloworld https://github.com/fw876/helloworld' >> feeds.conf.default
 
     - name: Free up disk space
       env:
@@ -105,34 +101,43 @@ jobs:
         ln -sf /mnt/openwrt/bin openwrt/bin
         ln -sf /mnt/openwrt/staging_dir openwrt/staging_dir
 
+    - name: Run customize.sh (for IP only)
+      run: |
+        # 检查customize.sh是否存在
+        if [ ! -f customize.sh ]; then
+          echo "⚠️ Warning: customize.sh not found in project root - skipping IP modification"
+        else
+          echo "✅ Running customize.sh to modify default IP"
+          chmod +x customize.sh
+          ./customize.sh
+        fi
+
     - name: Update feeds
       working-directory: ./openwrt
       run: |
+        # 添加helloworld源（仅用于获取插件定义，不安装）
+        echo 'src-git helloworld https://github.com/fw876/helloworld' >> feeds.conf.default
         ./scripts/feeds update -a
-
-    - name: Defconfig setup
-      run: |
-        cd openwrt
-        # Prepare configuration
-        cp ../.config .config
-        # Install helloworld package
-        ./scripts/feeds update helloworld
-        ./scripts/feeds install -a -p helloworld
-        # Basic configuration
-        cat >> .config <<EOF
-        CONFIG_TARGET_x86_64=y
-        CONFIG_PACKAGE_luci=y
-        CONFIG_PACKAGE_luci-app-helloworld=y
-        CONFIG_PACKAGE_luci-theme-argon=y
-        EOF
-        make defconfig
 
     - name: Load custom configuration
       run: |
+        # 检查项目根目录是否有.config
         if [ -e ./.config ]; then
+          echo "✅ Found .config in project root, copying to openwrt/.config"
           cp -f ./.config ./openwrt/.config
+        else
+          echo "⚠️ Warning: .config not found in project root, using default config"
         fi
-        cd ./openwrt
+        
+        # 检查项目根目录是否有files目录（用于自定义配置）
+        if [ -d ./files ]; then
+          echo "✅ Found files directory in project root, moving to openwrt/files"
+          mv -f ./files ./openwrt/files
+        fi
+        
+        # 进入openwrt目录，安装所有配置的包（包括helloworld，如果.config中指定了）
+        cd openwrt
+        ./scripts/feeds install -a
         make defconfig
 
     - name: SSH connection to Actions
@@ -170,7 +175,7 @@ jobs:
         mv -f openwrt/bin/targets/*/*/{*combined*,*sysupgrade*} ./firmware/ 2>/dev/null || true
         cd firmware
         echo "v $ {{ env.date2 }}" > version.txt
-        md5= $ ((md5sum *squashfs-sysupgrade* || md5sum *squashfs-combined-efi*) | awk '{print  $ 1}') 2>/dev/null
+        md5= $ (md5sum *squashfs-sysupgrade* 2>/dev/null | awk '{print  $ 1}' || md5sum *squashfs-combined-efi* 2>/dev/null | awk '{print  $ 1}')
         echo  $ md5 >> version.txt
         rename -v "s/^openwrt/ $ {{ env.VERSION }}-openwrt/" * || true
         echo  $ md5 >> version.txt
@@ -194,7 +199,7 @@ jobs:
         echo "Build date:  $ date" >> release.txt
         echo "MD5:  $ md5" >> release.txt
         echo "Firmware includes:" >> release.txt
-        echo "- helloworld plugin" >> release.txt
+        echo "- helloworld plugin (if configured in .config)" >> release.txt
         echo "status=success" >>  $ GITHUB_OUTPUT
 
     - name: Upload firmware to release
