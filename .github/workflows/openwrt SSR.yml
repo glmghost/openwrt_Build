@@ -2,7 +2,7 @@
 # Description: Build OpenWrt using GitHub Actions
 # License: MIT
 # Author: kenzo
-# Modified: Use project root .config and customize.sh for IP only
+# Modified: Fixed syntax errors for environment variables and git commands
 #=================================================
 
 name: OpenWrt Build with Custom Config
@@ -21,7 +21,6 @@ on:
         required: true
         default: '23.05'
         options:
-          - '24.10'
           - '23.05'
           - '22.03'
           - 'master'
@@ -105,12 +104,12 @@ jobs:
     - name: Run customize.sh (for IP only)
       run: |
         # 检查customize.sh是否存在
-        if [ ! -f customize.sh ]; then
-          echo "⚠️ Warning: customize.sh not found in project root - skipping IP modification"
-        else
+        if [ -f customize.sh ]; then
           echo "✅ Running customize.sh to modify default IP"
           chmod +x customize.sh
           ./customize.sh
+        else
+          echo "⚠️ Warning: customize.sh not found in project root - skipping IP modification"
         fi
 
     - name: Update feeds
@@ -130,13 +129,13 @@ jobs:
           echo "⚠️ Warning: .config not found in project root, using default config"
         fi
         
-        # 检查项目根目录是否有files目录（用于自定义配置）
+        # 检查项目根目录是否有files目录
         if [ -d ./files ]; then
           echo "✅ Found files directory in project root, moving to openwrt/files"
           mv -f ./files ./openwrt/files
         fi
         
-        # 进入openwrt目录，安装所有配置的包（包括helloworld，如果.config中指定了）
+        # 进入openwrt目录，安装所有配置的包
         cd openwrt
         ./scripts/feeds install -a
         make defconfig
