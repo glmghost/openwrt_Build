@@ -1,4 +1,11 @@
-name: OpenWrt-24.10 helloworld config
+#=================================================
+# Description: Build OpenWrt using GitHub Actions
+# Lisence: MIT
+# Author: kenzo
+# Modified by: [Your Name]
+#=================================================
+
+name: OpenWrt HelloWorld Config
 
 on:
   repository_dispatch:
@@ -8,10 +15,16 @@ on:
         description: 'ssh'
         required: false
         default: 'false'
-      minimal:
-        description: 'Minimal build (without Rust)'
-        required: false
-        default: 'false'
+      openwrt_version:
+        type: choice
+        description: 'OpenWrt Version'
+        required: true
+        default: '23.05'
+        options:
+          - '24.10'
+          - '23.05'
+          - '22.03'
+          - 'master'
 
 env:
   UPLOAD_BIN_DIR: false
@@ -24,24 +37,16 @@ env:
   REMOTE_HOST:  $ {{ secrets.REMOTE_HOST }}
   REMOTE_PORT:  $ {{ secrets.REMOTE_PORT }}
   DOCKER_ID:  $ {{ secrets.DOCKER_ID }}
-  DOCKER_PASSWD:  $ {{ secrets.DOCKER_PASSWD }}
+  DOCKER_PASSWD:  $ {{ secrets.DOCKER_PASSWD }}  
   TZ: Asia/Shanghai
-  MTARGET: "x86_64"
-  CONFIG_DIR: "."
-  RUST_BACKTRACE: 1
-  LLVM_DOWNLOAD_CI_LLVM: "if-unchanged"
 
 jobs:
   merge:
     runs-on: ubuntu-latest
     if: github.event.repository.owner.id == github.event.sender.id
 
-    name: Build  $ {{ matrix.target }}
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [OpenWrt-24.10]
-
+    name: Build OpenWrt  $ {{ github.event.inputs.openwrt_version }}
+    
     steps:
     - name: Checkout
       uses: actions/checkout@main
@@ -55,7 +60,7 @@ jobs:
         haskell: true
         large-packages: true
         docker-images: true
-        swap-storage: true
+        swap-storage: true       
 
     - name: Initialization environment
       env:
@@ -66,16 +71,11 @@ jobs:
         gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
         python3-setuptools rsync swig unzip zlib1g-dev file wget scdoc \
         llvm python3-pyelftools libpython3-dev aria2 jq qemu-utils ccache rename \
-        libelf-dev device-tree-compiler libgmp3-dev libmpc-dev libfuse-dev \
-        libzstd-dev liblz4-dev liblzo2-dev libbrotli-dev libz-dev \
-        liblzma-dev libtool autoconf automake pkg-config cpio
+        libelf-dev device-tree-compiler libgmp3-dev libmpc-dev libfuse-dev
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "Asia/Shanghai"
         
-        # 清理可能损坏的工具链
-        sudo rm -rf /usr/share/aclocal/libtool.m4
-
     - name: Get current date
       id: date
       run: |
@@ -83,304 +83,123 @@ jobs:
         echo "date2= $ (date +'%m/%d %Y')" >>  $ GITHUB_ENV
         echo "date3= $ (date +'%m.%d')" >>  $ GITHUB_ENV
         echo "DOCKERTAG= $ {{ secrets.DOCKER_ID }}/openwrt-6p:latest" >>  $ GITHUB_ENV
-        VERSION=" $ (echo " $ {{github.event.action}}" | grep -Eo "[0-9.]+" | sed -e 's/ //')" || true
+        VERSION=" $ (echo " $ {{github.event.action}}" | grep -Eo " [0-9.]+" | sed -e 's/ //')" || true
         [ " $ VERSION" ] && echo "VERSION= $ VERSION" >>  $ GITHUB_ENV || echo "VERSION= $ (date +'%m.%d')" >>  $ GITHUB_ENV
-
+        
     - name: Clone source code
-      env:
+      env: 
         REPO_URL: https://github.com/openwrt/openwrt
-        REPO_BRANCH: openwrt-24.10
+        REPO_BRANCH: openwrt- $ {{ github.event.inputs.openwrt_version }}
       run: |
-        # 修复变量引用语法 - 正确的方式（无空格，且使用  $ VARIABLE 语法）
-        git clone " $ REPO_URL" -b " $ REPO_BRANCH" openwrt
+        git clone --depth 1  $ REPO_URL -b  $ REPO_BRANCH openwrt
         cd openwrt
-        echo "src-git helloworld https://github.com/fw876/helloworld.git" >> feeds.conf.default
-        # 确保 libtool 被启用
-        echo "CONFIG_PACKAGE_libtool=y" >> .config 2>/dev/null || true
+        # Add helloworld source
+        echo 'src-git helloworld https://github.com/fw876/helloworld' >> feeds.conf.default
 
     - name: Free up disk space
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo mkdir -p -m 777 /mnt/openwrt/dl /mnt/openwrt/bin /mnt/openwrt/staging_dir \
-          /mnt/openwrt/build_dir /mnt/openwrt/tmp
-        
-        sudo mount -t tmpfs -o size=2G tmpfs /mnt/openwrt/tmp
-        
+        sudo mkdir -p -m 777 /mnt/openwrt/dl /mnt/openwrt/bin /mnt/openwrt/staging_dir
         ln -sf /mnt/openwrt/dl openwrt/dl
         ln -sf /mnt/openwrt/bin openwrt/bin
         ln -sf /mnt/openwrt/staging_dir openwrt/staging_dir
-        ln -sf /mnt/openwrt/build_dir openwrt/build_dir
-        ln -sf /mnt/openwrt/tmp openwrt/tmp
 
     - name: Update feeds
       working-directory: ./openwrt
       run: |
         ./scripts/feeds update -a
 
-    - name: Defconfig  $ {{ matrix.target }}
-      env:
-        CONFIG_FILE: ' $ {{ matrix.target }}.config'
-        MINIMAL_BUILD:  $ {{ github.event.inputs.minimal || 'false' }}
+    - name: Defconfig setup
       run: |
         cd openwrt
-
-        # 1. 加载主配置文件
-        if [ -e "../ $ {CONFIG_DIR:-.}/ $ {CONFIG_FILE}" ]; then
-          cp "../ $ {CONFIG_DIR:-.}/ $ {CONFIG_FILE}" .config
-          echo "✅ Using custom config:  $ {CONFIG_FILE}"
-        elif [ -e "../.config" ]; then
-          cp "../.config" .config
-          echo "✅ Using fallback .config from repo root"
-        else
-          echo "❌ No .config found! Build will fail."
-          exit 1
-        fi
-
-        # 2. 如果是精简构建，禁用 Rust 相关包
-        if [ " $ MINIMAL_BUILD" = "true" ]; then
-          echo "⚠️ Performing minimal build - disabling Rust packages"
-          sed -i '/CONFIG_PACKAGE_rust/d' .config
-          echo "CONFIG_PACKAGE_rust=n" >> .config
-          sed -i '/CONFIG_PACKAGE_rust-std/d' .config
-          echo "CONFIG_PACKAGE_rust-std=n" >> .config
-          sed -i '/CONFIG_PACKAGE_cargo/d' .config
-          echo "CONFIG_PACKAGE_cargo=n" >> .config
-        fi
-
-        # 3. 处理 customize.sh
-        if [ -e "../customize.sh" ]; then
-          echo "✅ Found customize.sh, running..."
-          cp ../customize.sh .
-          chmod +x ./customize.sh
-          ./customize.sh
-        fi
-
-        # 4. 更新并安装 feeds
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-
-        # 5. 生成最终配置
-        echo "✅ Finalizing configuration with make defconfig..."
+        # Prepare configuration
+        cp ../.config .config
+        # Install helloworld package
+        ./scripts/feeds update helloworld
+        ./scripts/feeds install -a -p helloworld
+        # Basic configuration
+        cat >> .config <<EOF
+        CONFIG_TARGET_x86_64=y
+        CONFIG_PACKAGE_luci=y
+        CONFIG_PACKAGE_luci-app-helloworld=y
+        CONFIG_PACKAGE_luci-theme-argon=y
+        EOF
         make defconfig
-        
-        # 6. 确保 libtool 正确配置
-        echo "CONFIG_PACKAGE_libtool=y" >> .config
-        echo "CONFIG_PACKAGE_automake=y" >> .config
-        echo "CONFIG_PACKAGE_autoconf=y" >> .config
-        make defconfig
-
-        # 7. 修复 Rust 构建问题：确保 config.toml 包含正确的设置
-        RUST_CONFIG_TOML="build_dir/target-x86_64_musl/host/rustc-1.89.0-src/config.toml"
-        if [ -f " $ RUST_CONFIG_TOML" ]; then
-          echo "🔧 Fixing Rust config.toml for CI compatibility..."
-          # 清理可能存在的旧设置
-          sed -i '/llvm.download-ci-llvm/d' " $ RUST_CONFIG_TOML"
-          # 添加正确的设置
-          echo "llvm.download-ci-llvm = \"if-unchanged\"" >> " $ RUST_CONFIG_TOML"
-        else
-          echo "⚠️ Warning: Rust config.toml not found at  $ RUST_CONFIG_TOML"
-        fi
 
     - name: Load custom configuration
       run: |
-        # 处理根目录的 .config 文件
         if [ -e ./.config ]; then
-          echo "✅ Found .config in GitHub repo root, syncing to openwrt build dir"
           cp -f ./.config ./openwrt/.config
         fi
-
-        # 处理根目录的 files 目录
-        if [ -d ./files ]; then
-          echo "✅ Found files directory in GitHub repo root, moving to openwrt dir"
-          mv -f ./files ./openwrt/files
-        fi
-
-        # 验证 openwrt 目录下的配置
         cd ./openwrt
-        if [ -e ./.config ]; then
-          echo "✅ Validating .config and finalizing configuration..."
-          make defconfig
-        fi
+        make defconfig
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
-      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
       env:
         TELEGRAM_CHAT_ID:  $ {{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_BOT_TOKEN:  $ {{ secrets.TELEGRAM_BOT_TOKEN }}
-
+        
     - name: Download package
       working-directory: ./openwrt
       run: |
-        # 预下载 libtool 以避免构建问题
-        ./scripts/feeds install libtool
-        ./scripts/feeds install automake
-        ./scripts/feeds install autoconf
-        
-        # 修正线程数计算
-        THREADS= $ ((  $ (nproc) - 2 ))
-        [  $ THREADS -lt 1 ] && THREADS=1
-        echo "Using  $ THREADS threads for download"
-        
-        make download -j $ THREADS
+        make download -j $ (( $ (nproc)+1))
         find dl -size -1024c -exec rm -f {} \;
-
+        
     - name: Cache
       uses: stupidloud/cachewrtbuild@main
       with:
         ccache: 'true'
-        mixkey:  $ {{ matrix.target }}
+        mixkey: openwrt- $ {{ github.event.inputs.openwrt_version }}
         clean:  $ {{ contains(github.event.action, 'nocache') }}
         prefix:  $ {{ github.workspace }}/openwrt
-
-    - name: Check space usage
-      run: |
-        echo "Disk space before build:"
-        df -hT
-        echo "Inode usage:"
-        df -i
-        
-        cd openwrt
-        # 确保 staging_dir 结构正确
-        mkdir -p staging_dir/host/bin staging_dir/host/lib staging_dir/host/include
-
+    
     - name: Compile the firmware
-      id: compile
       working-directory: ./openwrt
-      env:
-        LLVM_DOWNLOAD_CI_LLVM: "if-unchanged"
-        ULIMIT: unlimited
       run: |
-        # 增加 ulimit 限制
-        ulimit -s unlimited
-        ulimit -n 4096
-        
-        echo "=== Final .config summary ==="
-        grep -E "CONFIG_TARGET_|CONFIG_PACKAGE_" .config | head -n 30
-        echo "=== Disabled packages ==="
-        grep -E "^# CONFIG_PACKAGE_" .config | head -n 20
-        
-        # 重置 libtool 相关目录，避免构建错误
-        if [ -d "build_dir/host/libtool*" ]; then
-          echo "🧹 Cleaning up libtool build directory..."
-          rm -rf build_dir/host/libtool*
-        fi
-        
-        # 尝试先构建 host tools
-        echo "🔧 Building host tools first..."
-        make tools/install -j $ ((  $ (nproc) - 2 )) || {
-          echo "⚠️ Host tools build failed, but continuing with main build"
-          true
-        }
-        
-        # 构建 libtool 单独
-        echo "🔧 Building libtool separately..."
-        make package/libs/libtool/compile -j $ ((  $ (nproc) - 2 )) || {
-          echo "⚠️ Libtool build failed, but continuing with main build"
-          true
-        }
-        
-        # 主构建过程
-        echo "🚀 Starting main build process..."
-        make -j $ ((  $ (nproc) - 2 )) || {
-          echo "⚠️ First build attempt failed, retrying with fewer jobs..."
-          make -j2 V=s || {
-            echo "❌ Build failed completely"
-            exit 1
-          }
-        }
-        
-        echo "✅ Build completed successfully!"
-
-    - name: Upload bin directory
-      uses: actions/upload-artifact@main
-      if: steps.compile.outcome == 'success' && env.UPLOAD_BIN_DIR == 'true'
-      with:
-        name: OpenWrt_bin $ {{ env.DEVICE_NAME }} $ {{ env.FILE_DATE }}
-        path: openwrt/bin
+        echo -e " $ (( $ (nproc)+1)) thread compile"
+        make -j $ (( $ (nproc)+1)) || make -j1 V=s
 
     - name: Organize files
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && steps.compile.outcome == 'success'
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
-        mkdir -p firmware
-        cd openwrt/bin/targets/*/*/
-        
-        # 只复制必要的固件文件
-        for file in *sysupgrade*.bin *sysupgrade*.tar *combined*.bin *combined*.img *combined-efi*.bin *combined-efi*.img; do
-          [ -f " $ file" ] && cp " $ file" ../../../../../firmware/
-        done
-        
-        cd ../../../../..
-        cp openwrt/.config ./firmware/ $ {{ matrix.target }}.config 2>/dev/null || true
-        mkdir -p ./firmware/kernel-config
-        cp openwrt/build_dir/target-*/linux-*/linux-*/.config ./firmware/kernel-config/ $ {{ matrix.target }}_kernel.config 2>/dev/null || true
-        
+        mkdir firmware
+        mv -f openwrt/bin/targets/*/*/{*combined*,*sysupgrade*} ./firmware/ 2>/dev/null || true
         cd firmware
         echo "v $ {{ env.date2 }}" > version.txt
-        for file in *sysupgrade*.bin *sysupgrade*.tar *combined*.bin *combined*.img *combined-efi*.bin *combined-efi*.img; do
-          [ -f " $ file" ] && md5sum " $ file" | awk '{print  $ 1}' >> version.txt
-        done
-        rename -v "s/^openwrt/ $ {{ env.VERSION }}-openwrt/" * 2>/dev/null || true
-        rename -v "s/friendlyarm_//" *gz 2>/dev/null || true
-        echo " $ {{ matrix.target }}" >> version.txt
-        echo "Build date:  $ {{ env.date }}" >> version.txt
-        rm -f sha256sums 2>/dev/null || true
+        md5= $ ((md5sum *squashfs-sysupgrade* || md5sum *squashfs-combined-efi*) | awk '{print  $ 1}') 2>/dev/null
+        echo  $ md5 >> version.txt
+        rename -v "s/^openwrt/ $ {{ env.VERSION }}-openwrt/" * || true
+        echo  $ md5 >> version.txt
+        echo "OpenWrt  $ {{ github.event.inputs.openwrt_version }}" >> version.txt
         echo "FIRMWARE= $ PWD" >>  $ GITHUB_ENV
-
+        
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
-      if: steps.organize.outcome == 'success'
+      if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: OpenWrt_firmware $ {{ env.DEVICE_NAME }} $ {{ env.FILE_DATE }}
+        name: OpenWrt_firmware- $ {{ github.event.inputs.openwrt_version }}- $ {{ env.date }}
         path:  $ {{ env.FIRMWARE }}
-
-    - name: Upload firmware to cowtransfer
-      id: cowtransfer
-      if: steps.organize.outcome == 'success' && env.UPLOAD_COWTRANSFER == 'true'
-      run: |
-        curl -fsSL git.io/file-transfer | sh
-        ./transfer cow --block 2621440 -s -p 64 --no-progress  $ FIRMWARE 2>&1 | tee cowtransfer.log
-        echo "::warning file=cowtransfer.com:: $ (cat cowtransfer.log | grep https)"
-        echo "url= $ (cat cowtransfer.log | grep https | cut -f3 -d' ')" >>  $ GITHUB_OUTPUT
-
-    - name: Upload firmware to WeTransfer
-      id: wetransfer
-      if: steps.organize.outcome == 'success' && env.UPLOAD_WETRANSFER == 'true'
-      run: |
-        curl -fsSL git.io/file-transfer | sh
-        ./transfer wet -s -p 16 --no-progress  $ FIRMWARE 2>&1 | tee wetransfer.log
-        echo "::warning file=wetransfer.com:: $ (cat wetransfer.log | grep https)"
-        echo "url= $ (cat wetransfer.log | grep https | cut -f3 -d' ')" >>  $ GITHUB_OUTPUT
 
     - name: Generate release tag
       id: tag
-      if: env.UPLOAD_RELEASE == 'true' && steps.organize.outcome == 'success'
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         echo "release_tag= $ (date +"%Y.%m.%d-%H%M")" >>  $ GITHUB_OUTPUT
         touch release.txt
-        echo "# OpenWrt Firmware Release" > release.txt
-        echo "" >> release.txt
-        echo "Build Date:  $ {{ env.date2 }}" >> release.txt
-        echo "Target:  $ {{ matrix.target }}" >> release.txt
-        echo "" >> release.txt
-        echo "## Downloads" >> release.txt
-        
-        [ " $ UPLOAD_COWTRANSFER" = "true" ] && echo "- [Download via Cowtransfer]( $ {{ steps.cowtransfer.outputs.url }})" >> release.txt
-        [ " $ UPLOAD_WETRANSFER" = "true" ] && echo "- [Download via WeTransfer]( $ {{ steps.wetransfer.outputs.url }})" >> release.txt
-        
-        echo "" >> release.txt
-        echo "## File Checksums" >> release.txt
-        echo "```" >> release.txt
-        cat  $ {{ env.FIRMWARE }}/version.txt >> release.txt
-        echo "```" >> release.txt
-        
+        echo "OpenWrt  $ {{ github.event.inputs.openwrt_version }} Firmware" > release.txt
+        echo "Build date:  $ date" >> release.txt
+        echo "MD5:  $ md5" >> release.txt
+        echo "Firmware includes:" >> release.txt
+        echo "- helloworld plugin" >> release.txt
         echo "status=success" >>  $ GITHUB_OUTPUT
 
     - name: Upload firmware to release
       uses: softprops/action-gh-release@v1
-      if: steps.tag.outputs.status == 'success'
+      if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN:  $ {{ secrets.GITHUB_TOKEN }}
       with:
@@ -395,8 +214,8 @@ jobs:
         keep_minimum_runs: 3
 
     - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@v0.3.0
-      if: env.UPLOAD_RELEASE == 'true' && steps.tag.outputs.status == 'success'
+      uses: dev-drprasad/delete-older-releases@v0.2.1
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
         keep_latest: 3
         delete_tags: true
