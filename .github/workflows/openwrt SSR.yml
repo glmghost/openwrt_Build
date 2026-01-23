@@ -98,7 +98,7 @@ jobs:
         REPO_URL: https://github.com/openwrt/openwrt
         REPO_BRANCH: openwrt-24.10
       run: |
-        # 修复变量引用语法
+        # 修复变量引用语法 - 正确的方式
         git clone " $ REPO_URL" -b " $ REPO_BRANCH" openwrt
         cd openwrt
         echo "src-git helloworld https://github.com/fw876/helloworld.git" >> feeds.conf.default
