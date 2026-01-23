@@ -32,9 +32,8 @@ env:
   DOCKER_ID:  $ {{ secrets.DOCKER_ID }}
   DOCKER_PASSWD:  $ {{ secrets.DOCKER_PASSWD }}
   TZ: Asia/Shanghai
-  MTARGET: "x86_64"  # 根据您的目标设备修改
+  MTARGET: "x86_64"
   CONFIG_DIR: "."
-  # 修复 Rust 构建问题的关键环境变量
   RUST_BACKTRACE: 1
   LLVM_DOWNLOAD_CI_LLVM: "if-unchanged"
 
@@ -90,7 +89,7 @@ jobs:
         echo "date2= $ (date +'%m/%d %Y')" >>  $ GITHUB_ENV
         echo "date3= $ (date +'%m.%d')" >>  $ GITHUB_ENV
         echo "DOCKERTAG= $ {{ secrets.DOCKER_ID }}/openwrt-6p:latest" >>  $ GITHUB_ENV
-        VERSION=" $ (echo " $ {{github.event.action}}" | grep -Eo " [0-9.]+" | sed -e 's/ //')" || true
+        VERSION=" $ (echo " $ {{github.event.action}}" | grep -Eo "[0-9.]+" | sed -e 's/ //')" || true
         [ " $ VERSION" ] && echo "VERSION= $ VERSION" >>  $ GITHUB_ENV || echo "VERSION= $ (date +'%m.%d')" >>  $ GITHUB_ENV
 
     - name: Clone source code
@@ -256,9 +255,7 @@ jobs:
       id: compile
       working-directory: ./openwrt
       env:
-        # 修复 Rust 构建的关键环境变量
         LLVM_DOWNLOAD_CI_LLVM: "if-unchanged"
-        # 增加 ulimit 限制
         ULIMIT: unlimited
       run: |
         # 增加 ulimit 限制
@@ -280,14 +277,14 @@ jobs:
         echo "🔧 Building host tools first..."
         make tools/install -j $ ((  $ (nproc) - 2 )) || {
           echo "⚠️ Host tools build failed, but continuing with main build"
-          true  # 忽略错误继续执行
+          true
         }
         
         # 构建 libtool 单独
         echo "🔧 Building libtool separately..."
         make package/libs/libtool/compile -j $ ((  $ (nproc) - 2 )) || {
           echo "⚠️ Libtool build failed, but continuing with main build"
-          true  # 忽略错误继续执行
+          true
         }
         
         # 主构建过程
