@@ -16,7 +16,7 @@ env:
   REPO_BRANCH: main
   TZ: Asia/Shanghai
 
-on:
+off:
   schedule:
     - cron: 0 9 * * SAT
   workflow_dispatch:
