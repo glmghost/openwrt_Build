@@ -102,6 +102,16 @@ jobs:
       run: |
         ./scripts/feeds update -a
 
+    - name: Update jell feeds
+      working-directory: ./openwrt
+      run: |
+        ./scripts/feeds update jell
+
+    - name: Install jell packages
+      working-directory: ./openwrt
+      run: |
+        ./scripts/feeds install -a -f
+
     - name: Defconfig ${{matrix.target}}
       env:
         CONFIG_FILE: '${{matrix.target}}.config'
@@ -112,16 +122,34 @@ jobs:
         rm -rf feeds/packages/lang/golang
         git clone https://github.com/kenzok8/golang -b 1.26 feeds/packages/lang/golang
         rm -rf feeds/luci/applications/luci-app-openclash
-        cp -f feeds/jell/.github/diy/default-settings package/lean/default-settings/files/zzz-default-settings
-        cp -f feeds/jell/.github/diy/banner package/base-files/files/etc/banner
-        #cp -f feeds/jell/.github/diy/index_x86.htm package/lean/autocore/files/x86/index.htm
+        
+        # 检查 jell 源码是否存在相关文件，如果存在则复制，否则跳过或使用默认值
+        if [ -f "feeds/jell/.github/diy/default-settings" ]; then
+          cp -f feeds/jell/.github/diy/default-settings package/lean/default-settings/files/zzz-default-settings
+          echo "✅ Successfully copied default-settings from jell"
+        else
+          echo "⚠️ Warning: feeds/jell/.github/diy/default-settings not found, using existing settings"
+        fi
+        
+        if [ -f "feeds/jell/.github/diy/banner" ]; then
+          cp -f feeds/jell/.github/diy/banner package/base-files/files/etc/banner
+          echo "✅ Successfully copied banner from jell"
+        else
+          echo "⚠️ Warning: feeds/jell/.github/diy/banner not found, using existing banner"
+        fi
+        
+        # 更新配置文件
         sed -i "s/%D %V, %C/openwrt $(date +'%m.%d') by kenzo/g" package/base-files/files/etc/banner
         sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
         ./scripts/feeds update -a 
         sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
         ./scripts/feeds install -a
-        cp -f feeds/jell/.github/diy/${{matrix.target}}.config .config && make defconfig
-        #sed -i 's/CONFIG_BINUTILS_VERSION="2.42"/CONFIG_BINUTILS_VERSION="2.43.1"/' .config
+        if [ -f "feeds/jell/.github/diy/${{matrix.target}}.config" ]; then
+          cp -f feeds/jell/.github/diy/${{matrix.target}}.config .config
+        else
+          echo "⚠️ Warning: feeds/jell/.github/diy/${{matrix.target}}.config not found, using existing config"
+        fi
+        make defconfig
         
     - name: Load custom configuration
       run: |
@@ -340,4 +368,3 @@ jobs:
         delete_tags: true
       env:
         GITHUB_TOKEN: ${{ secrets.REPO_TOKEN }}
-        
