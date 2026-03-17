@@ -4,7 +4,7 @@
 # Author: kenzo
 #=================================================
 
-name: Lean.ss
+name: Lean
 
 on:
   repository_dispatch:
@@ -116,10 +116,16 @@ jobs:
           rm -rf feeds/jell/dapnet-gateway
         fi
         
-        # 同样移除其他可能有问题的包（如果存在）
-        if [ -d "feeds/jell/luci-app-dapnetgateway" ]; then
-          echo "Removing luci-app-dapnetgateway package"
-          rm -rf feeds/jell/luci-app-dapnetgateway
+        # 移除编译失败的 shadowsocksr-libev 包
+        if [ -d "feeds/jell/shadowsocksr-libev" ]; then
+          echo "Removing shadowsocksr-libev package due to patch failure"
+          rm -rf feeds/jell/shadowsocksr-libev
+        fi
+        
+        # 移除相关的 luci 应用
+        if [ -d "feeds/jell/luci-app-shadowsocksr-libev" ]; then
+          echo "Removing luci-app-shadowsocksr-libev package"
+          rm -rf feeds/jell/luci-app-shadowsocksr-libev
         fi
 
     - name: Install feeds packages
@@ -239,7 +245,7 @@ jobs:
       run: |
         echo -e "$(($(nproc)+1)) thread compile"
         # 排除有问题的包进行编译
-        make -j$(($(nproc)+1)) V=s || make -j1 V=s
+        make -j$(($(nproc)+1)) || make -j1 V=s
 
     - name: Upload bin directory
       uses: actions/upload-artifact@main
