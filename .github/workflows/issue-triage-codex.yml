@@ -1,6 +1,6 @@
 name: Issue Triage Codex
 
-on:
+off:
   workflow_dispatch:
     inputs:
       dry_run:
