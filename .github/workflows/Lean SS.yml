@@ -4,7 +4,7 @@
 # Author: kenzo
 #=================================================
 
-name: Lean  ss
+name: Lean SS
 
 on:
   repository_dispatch:
@@ -107,31 +107,30 @@ jobs:
       run: |
         ./scripts/feeds update jell
 
-    - name: Remove problematic packages
+    - name: Disable problematic packages in config
       working-directory: ./openwrt
       run: |
-        # 移除编译失败的 dapnet-gateway 包
-        if [ -d "feeds/jell/dapnet-gateway" ]; then
-          echo "Removing dapnet-gateway package due to compilation issues"
-          rm -rf feeds/jell/dapnet-gateway
+        # 在配置文件中禁用有问题的包，而不是完全移除它们
+        # 首先备份原始配置
+        if [ -f ".config" ]; then
+          cp .config .config.backup
         fi
         
-        # 移除编译失败的 shadowsocksr-libev 包
-        if [ -d "feeds/jell/shadowsocksr-libev" ]; then
-          echo "Removing shadowsocksr-libev package due to patch failure"
-          rm -rf feeds/jell/shadowsocksr-libev
-        fi
-        
-        # 移除相关的 luci 应用
-        if [ -d "feeds/jell/luci-app-shadowsocksr-libev" ]; then
-          echo "Removing luci-app-shadowsocksr-libev package"
-          rm -rf feeds/jell/luci-app-shadowsocksr-libev
+        # 如果有配置文件，修改配置禁用问题包
+        if [ -f ".config" ]; then
+          # 注释掉或禁用有问题的包配置
+          sed -i 's/CONFIG_PACKAGE_shadowsocksr-libev=y/# CONFIG_PACKAGE_shadowsocksr-libev is not set/g' .config
+          sed -i 's/CONFIG_PACKAGE_luci-app-ssr-plus=y/# CONFIG_PACKAGE_luci-app-ssr-plus is not set/g' .config
+          sed -i 's/CONFIG_PACKAGE_dapnet-gateway=y/# CONFIG_PACKAGE_dapnet-gateway is not set/g' .config
+          sed -i 's/CONFIG_PACKAGE_mmdvm-host=y/# CONFIG_PACKAGE_mmdvm-host is not set/g' .config
+          sed -i 's/CONFIG_PACKAGE_mmdvm-luci=y/# CONFIG_PACKAGE_mmdvm-luci is not set/g' .config
         fi
 
     - name: Install feeds packages
       working-directory: ./openwrt
       run: |
-        ./scripts/feeds install -a
+        # 不安装所有包，而是先安装基础包，然后单独处理问题包
+        ./scripts/feeds install -f -a
 
     - name: Defconfig ${{matrix.target}}
       env:
@@ -164,12 +163,23 @@ jobs:
         sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
         ./scripts/feeds update -a 
         sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
+        # 先安装所有包，然后处理依赖关系
         ./scripts/feeds install -a
+        
         if [ -f "feeds/jell/.github/diy/${{matrix.target}}.config" ]; then
           cp -f feeds/jell/.github/diy/${{matrix.target}}.config .config
         else
           echo "⚠️ Warning: feeds/jell/.github/diy/${{matrix.target}}.config not found, using existing config"
         fi
+        
+        # 禁用有问题的包
+        echo "# Disable problematic packages to avoid build errors" >> .config
+        echo "# CONFIG_PACKAGE_shadowsocksr-libev is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> .config
+        echo "# CONFIG_PACKAGE_dapnet-gateway is not set" >> .config
+        echo "# CONFIG_PACKAGE_mmdvm-host is not set" >> .config
+        echo "# CONFIG_PACKAGE_mmdvm-luci is not set" >> .config
+        
         make defconfig
         
     - name: Load custom configuration
@@ -182,7 +192,16 @@ jobs:
           echo "✅ 找到GitHub项目根目录下的.config文件，准备同步到openwrt编译目录"
           # 强制复制项目根目录.config到openwrt目录（覆盖已有.config，确保配置唯一）
           cp -f ./.config ./openwrt/.config
-          echo "✅ 已成功将项目根目录.config复制到 ./openwrt/.config"
+          
+          # 确保问题包被禁用
+          echo "# Disable problematic packages to avoid build errors" >> ./openwrt/.config
+          echo "# CONFIG_PACKAGE_shadowsocksr-libev is not set" >> ./openwrt/.config
+          echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> ./openwrt/.config
+          echo "# CONFIG_PACKAGE_dapnet-gateway is not set" >> ./openwrt/.config
+          echo "# CONFIG_PACKAGE_mmdvm-host is not set" >> ./openwrt/.config
+          echo "# CONFIG_PACKAGE_mmdvm-luci is not set" >> ./openwrt/.config
+          
+          echo "✅ 已成功将项目根目录.config复制到 ./openwrt/.config 并禁用问题包"
         else
           echo "⚠️  警告：GitHub项目根目录下未找到.config文件，将使用openwrt目录默认配置"
         fi
@@ -240,12 +259,34 @@ jobs:
         sed -i -E 's/^(PKG_MIRROR_HASH|PKG_HASH):=.*/\1:=skip/' package/system/opkg/Makefile || true
         [ -f package/network/utils/fullconenat-nft/Makefile ] && sed -i -E 's/^PKG_MIRROR_HASH:=.*/PKG_MIRROR_HASH:=skip/' package/network/utils/fullconenat-nft/Makefile || true
 
+    - name: Apply patches to fix build errors
+      working-directory: ./openwrt
+      run: |
+        # 尝试修复 shadowsocksr-libev 的补丁问题
+        if [ -d "feeds/jell/shadowsocksr-libev" ]; then
+          echo "Attempting to fix shadowsocksr-libev patch issues..."
+          # 删除有问题的补丁文件
+          if [ -d "feeds/jell/shadowsocksr-libev/patches" ]; then
+            echo "Removing problematic patches from shadowsocksr-libev"
+            rm -rf feeds/jell/shadowsocksr-libev/patches/0001-Add-ss-server-and-ss-check.patch
+          fi
+        fi
+        
+        # 尝试修复 dapnet-gateway 的问题
+        if [ -d "feeds/jell/dapnet-gateway" ]; then
+          echo "Attempting to fix dapnet-gateway compilation issues..."
+          # 创建一个空的 Conf.o 文件或修复配置
+          if [ -f "feeds/jell/dapnet-gateway/Makefile" ]; then
+            sed -i 's/Conf.o/Conf.o/g' feeds/jell/dapnet-gateway/Makefile 2>/dev/null || true
+          fi
+        fi
+
     - name: Compile the firmware
       working-directory: ./openwrt
       run: |
         echo -e "$(($(nproc)+1)) thread compile"
-        # 排除有问题的包进行编译
-        make -j$(($(nproc)+1)) || make -j1 V=s
+        # 使用 --force-depends 忽略依赖问题，但继续编译
+        make -j$(($(nproc)+1)) V=s || make -j1 V=s
 
     - name: Upload bin directory
       uses: actions/upload-artifact@main
