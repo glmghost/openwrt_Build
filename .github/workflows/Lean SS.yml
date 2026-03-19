@@ -107,30 +107,10 @@ jobs:
       run: |
         ./scripts/feeds update jell
 
-    - name: Disable problematic packages in config
+    - name: Install jell packages
       working-directory: ./openwrt
       run: |
-        # 在配置文件中禁用有问题的包，而不是完全移除它们
-        # 首先备份原始配置
-        if [ -f ".config" ]; then
-          cp .config .config.backup
-        fi
-        
-        # 如果有配置文件，修改配置禁用问题包
-        if [ -f ".config" ]; then
-          # 注释掉或禁用有问题的包配置
-          sed -i 's/CONFIG_PACKAGE_shadowsocksr-libev=y/# CONFIG_PACKAGE_shadowsocksr-libev is not set/g' .config
-          sed -i 's/CONFIG_PACKAGE_luci-app-ssr-plus=y/# CONFIG_PACKAGE_luci-app-ssr-plus is not set/g' .config
-          sed -i 's/CONFIG_PACKAGE_dapnet-gateway=y/# CONFIG_PACKAGE_dapnet-gateway is not set/g' .config
-          sed -i 's/CONFIG_PACKAGE_mmdvm-host=y/# CONFIG_PACKAGE_mmdvm-host is not set/g' .config
-          sed -i 's/CONFIG_PACKAGE_mmdvm-luci=y/# CONFIG_PACKAGE_mmdvm-luci is not set/g' .config
-        fi
-
-    - name: Install feeds packages
-      working-directory: ./openwrt
-      run: |
-        # 不安装所有包，而是先安装基础包，然后单独处理问题包
-        ./scripts/feeds install -f -a
+        ./scripts/feeds install -a -f
 
     - name: Defconfig ${{matrix.target}}
       env:
@@ -163,23 +143,12 @@ jobs:
         sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
         ./scripts/feeds update -a 
         sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
-        # 先安装所有包，然后处理依赖关系
         ./scripts/feeds install -a
-        
         if [ -f "feeds/jell/.github/diy/${{matrix.target}}.config" ]; then
           cp -f feeds/jell/.github/diy/${{matrix.target}}.config .config
         else
           echo "⚠️ Warning: feeds/jell/.github/diy/${{matrix.target}}.config not found, using existing config"
         fi
-        
-        # 禁用有问题的包
-        echo "# Disable problematic packages to avoid build errors" >> .config
-        echo "# CONFIG_PACKAGE_shadowsocksr-libev is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> .config
-        echo "# CONFIG_PACKAGE_dapnet-gateway is not set" >> .config
-        echo "# CONFIG_PACKAGE_mmdvm-host is not set" >> .config
-        echo "# CONFIG_PACKAGE_mmdvm-luci is not set" >> .config
-        
         make defconfig
         
     - name: Load custom configuration
@@ -192,16 +161,7 @@ jobs:
           echo "✅ 找到GitHub项目根目录下的.config文件，准备同步到openwrt编译目录"
           # 强制复制项目根目录.config到openwrt目录（覆盖已有.config，确保配置唯一）
           cp -f ./.config ./openwrt/.config
-          
-          # 确保问题包被禁用
-          echo "# Disable problematic packages to avoid build errors" >> ./openwrt/.config
-          echo "# CONFIG_PACKAGE_shadowsocksr-libev is not set" >> ./openwrt/.config
-          echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> ./openwrt/.config
-          echo "# CONFIG_PACKAGE_dapnet-gateway is not set" >> ./openwrt/.config
-          echo "# CONFIG_PACKAGE_mmdvm-host is not set" >> ./openwrt/.config
-          echo "# CONFIG_PACKAGE_mmdvm-luci is not set" >> ./openwrt/.config
-          
-          echo "✅ 已成功将项目根目录.config复制到 ./openwrt/.config 并禁用问题包"
+          echo "✅ 已成功将项目根目录.config复制到 ./openwrt/.config"
         else
           echo "⚠️  警告：GitHub项目根目录下未找到.config文件，将使用openwrt目录默认配置"
         fi
@@ -222,6 +182,44 @@ jobs:
         else
           echo "⚠️  警告：openwrt目录下无有效.config文件，后续编译可能失败"
         fi
+
+    - name: Fix dapnet-gateway package dependencies
+      working-directory: ./openwrt
+      run: |
+        # 检查是否存在 dapnet-gateway 包
+        if [ -d "feeds/jell/net/dapnet-gateway" ]; then
+          echo "正在修复 dapnet-gateway 包..."
+          
+          # 查找并检查 Makefile
+          DAPNET_MAKEFILE="feeds/jell/net/dapnet-gateway/Makefile"
+          if [ -f "$DAPNET_MAKEFILE" ]; then
+            echo "修复 dapnet-gateway Makefile 中的依赖问题..."
+            
+            # 检查是否有缺失的依赖或不兼容的库
+            if grep -q "libopenssl" "$DAPNET_MAKEFILE"; then
+              # 尝试修复 OpenSSL 依赖问题
+              sed -i 's/libopenssl/libopenssl-dev/g' "$DAPNET_MAKEFILE" || true
+              sed -i 's/PKG_BUILD_DEPENDS:=libopenssl/PKG_BUILD_DEPENDS:=libopenssl-dev OPENSSL_OPTIONS=generic/g' "$DAPNET_MAKEFILE" || true
+            fi
+            
+            # 添加一些常见的构建依赖
+            if ! grep -q "librt" "$DAPNET_MAKEFILE"; then
+              sed -i '/PKG_BUILD_DEPENDS:=/ s/$/ +librt/' "$DAPNET_MAKEFILE" || true
+            fi
+          fi
+          
+          # 如果是 C++ 项目，可能需要添加 CXXFLAGS
+          if [ -f "$DAPNET_MAKEFILE" ] && (grep -q "\\.cpp\|\\.cc" "$DAPNET_MAKEFILE" || grep -q "CXX" "$DAPNET_MAKEFILE"); then
+            echo "检测到 C++ 代码，添加必要的编译标志..."
+            sed -i '/CXXFLAGS+=/a CXXFLAGS += -std=c++11' "$DAPNET_MAKEFILE" || true
+          fi
+        else
+          echo "警告: 未找到 dapnet-gateway 包"
+        fi
+        
+        # 更新所有 feed 以确保最新
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -259,34 +257,12 @@ jobs:
         sed -i -E 's/^(PKG_MIRROR_HASH|PKG_HASH):=.*/\1:=skip/' package/system/opkg/Makefile || true
         [ -f package/network/utils/fullconenat-nft/Makefile ] && sed -i -E 's/^PKG_MIRROR_HASH:=.*/PKG_MIRROR_HASH:=skip/' package/network/utils/fullconenat-nft/Makefile || true
 
-    - name: Apply patches to fix build errors
-      working-directory: ./openwrt
-      run: |
-        # 尝试修复 shadowsocksr-libev 的补丁问题
-        if [ -d "feeds/jell/shadowsocksr-libev" ]; then
-          echo "Attempting to fix shadowsocksr-libev patch issues..."
-          # 删除有问题的补丁文件
-          if [ -d "feeds/jell/shadowsocksr-libev/patches" ]; then
-            echo "Removing problematic patches from shadowsocksr-libev"
-            rm -rf feeds/jell/shadowsocksr-libev/patches/0001-Add-ss-server-and-ss-check.patch
-          fi
-        fi
-        
-        # 尝试修复 dapnet-gateway 的问题
-        if [ -d "feeds/jell/dapnet-gateway" ]; then
-          echo "Attempting to fix dapnet-gateway compilation issues..."
-          # 创建一个空的 Conf.o 文件或修复配置
-          if [ -f "feeds/jell/dapnet-gateway/Makefile" ]; then
-            sed -i 's/Conf.o/Conf.o/g' feeds/jell/dapnet-gateway/Makefile 2>/dev/null || true
-          fi
-        fi
-
     - name: Compile the firmware
       working-directory: ./openwrt
       run: |
         echo -e "$(($(nproc)+1)) thread compile"
-        # 使用 --force-depends 忽略依赖问题，但继续编译
-        make -j$(($(nproc)+1)) V=s || make -j1 V=s
+        # 编译时启用详细日志，以便调试
+        make -j$(nproc) V=s
 
     - name: Upload bin directory
       uses: actions/upload-artifact@main
